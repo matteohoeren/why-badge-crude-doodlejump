@@ -1,3 +1,10 @@
+# ATTENTION: THIS IS AI-CODED SLOP
+However you might still have a little fun with it. 
+
+Right now it is a crude doodle jump game and it might be further developed ;)
+
+Here is the original BadgeVMS Readme:
+
 # Welcome to BadgeVMS
 
 BadgeVMS is the most used Badge operating system on the WHY2025 camp.
