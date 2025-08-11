@@ -1,7 +1,7 @@
 [[apps]]
 name = "doodle-jump"
 application = "why2025_doodle_jump"
-path = "APPS:[why2025_sponsors]why2025_sponsors.elf"
+path = "APPS:[why2025_doodle_jump]why2025_doodle_jump.elf"
 restart_on_failure = false
 stack_size = 16384
 args = ["--boot"]
