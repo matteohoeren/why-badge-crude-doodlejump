@@ -12,6 +12,11 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+// Include BadgeVMS device support for BMI270 (only when building for badge hardware)
+#ifdef BADGEVMS_BUILD
+#include "badgevms/device.h"
+#endif
+
 // Game constants
 #define WINDOW_WIDTH           576
 #define WINDOW_HEIGHT          432
@@ -68,6 +73,9 @@ typedef struct {
     int last_platform_landed; // Index of last platform landed on to avoid double counting
     bool game_running;
     Uint64 last_time;
+#ifdef BADGEVMS_BUILD
+    orientation_device_t *orientation; // BMI270 orientation sensor
+#endif
 } GameState;
 
 // Function declarations
@@ -98,6 +106,14 @@ void init_game(GameState *game) {
     game->platforms_landed = 0;
     game->last_platform_landed = -1;
     game->game_running = true;
+    
+#ifdef BADGEVMS_BUILD
+    // Initialize BMI270 orientation sensor
+    game->orientation = (orientation_device_t *)device_get("ORIENTATION0");
+    if (game->orientation == NULL) {
+        printf("Warning: BMI270 orientation sensor not found - tilt controls disabled\n");
+    }
+#endif
     
     // Generate initial platforms
     generate_platforms(game);
@@ -466,13 +482,47 @@ void handle_input(GameState *game, const bool *keyboard_state, float delta_time)
     // Horizontal movement with acceleration
     float target_vx = 0;
     
-    // Left/Right movement
+    // Keyboard controls (Left/Right movement)
     if (keyboard_state[SDL_SCANCODE_LEFT] || keyboard_state[SDL_SCANCODE_A]) {
         target_vx = -PLAYER_SPEED;
     }
     if (keyboard_state[SDL_SCANCODE_RIGHT] || keyboard_state[SDL_SCANCODE_D]) {
         target_vx = PLAYER_SPEED;
     }
+    
+#ifdef BADGEVMS_BUILD
+    // BMI270 tilt controls (if sensor is available)
+    if (game->orientation != NULL) {
+        int degrees = game->orientation->_get_orientation_degrees(game->orientation);
+        
+        // Convert tilt angle to movement speed
+        // Tilt range: -45° to +45° for left/right movement
+        // 0° = no movement, -45° = full left, +45° = full right
+        if (degrees >= 0 && degrees <= 180) {
+            // Right tilt (0° to 45°)
+            if (degrees <= 45) {
+                float tilt_factor = (float)degrees / 45.0f; // 0.0 to 1.0
+                target_vx = PLAYER_SPEED * tilt_factor;
+            }
+            // Left tilt (135° to 180°, then 180° to 225° mapped to negative)
+            else if (degrees >= 135) {
+                float tilt_factor;
+                if (degrees <= 180) {
+                    tilt_factor = (180.0f - (float)degrees) / 45.0f; // 1.0 to 0.0
+                } else {
+                    tilt_factor = ((float)degrees - 180.0f) / 45.0f; // 0.0 to 1.0
+                }
+                target_vx = -PLAYER_SPEED * tilt_factor;
+            }
+        } else if (degrees > 180) {
+            // Handle 315° to 360° range (left tilt)
+            if (degrees >= 315) {
+                float tilt_factor = (360.0f - (float)degrees) / 45.0f; // 1.0 to 0.0
+                target_vx = -PLAYER_SPEED * tilt_factor;
+            }
+        }
+    }
+#endif
     
     // Apply acceleration towards target velocity
     if (target_vx != 0) {
