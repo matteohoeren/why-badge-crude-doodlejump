@@ -145,8 +145,15 @@ void generate_platforms(GameState *game) {
         
         platform->active = true;
         
-        // Move to next platform position
-        current_y -= PLATFORM_SPACING_MIN + (SDL_rand(PLATFORM_SPACING_MAX - PLATFORM_SPACING_MIN));
+        // Move to next platform position with difficulty scaling
+        // As we go higher (more negative Y), increase spacing between platforms
+        float height_factor = (-current_y) / 500.0f; // Difficulty increases every 500 units
+        int additional_spacing = (int)(height_factor * 20); // Up to 20 extra pixels per difficulty level
+        
+        // Clamp the additional spacing to prevent impossible gaps
+        if (additional_spacing > 40) additional_spacing = 40;
+        
+        current_y -= PLATFORM_SPACING_MIN + (SDL_rand(PLATFORM_SPACING_MAX - PLATFORM_SPACING_MIN)) + additional_spacing;
     }
 }
 
@@ -478,11 +485,33 @@ void render_game(GameState *game) {
     // Render the actual number using our render_number function
     render_number(game->renderer, game->platforms_landed, 80, 10, 3.0f);
     
-    // Game over text (simple rectangle pattern)
+    // Game over screen with better text
     if (!game->game_running) {
-        SDL_SetRenderDrawColor(game->renderer, 255, 0, 0, 128);
-        SDL_FRect game_over_rect = { WINDOW_WIDTH / 4, WINDOW_HEIGHT / 2 - 50, WINDOW_WIDTH / 2, 100 };
+        // Semi-transparent background
+        SDL_SetRenderDrawColor(game->renderer, 0, 0, 0, 180);
+        SDL_FRect overlay = { 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT };
+        SDL_RenderFillRect(game->renderer, &overlay);
+        
+        // Game Over box
+        SDL_SetRenderDrawColor(game->renderer, 255, 0, 0, 255);
+        SDL_FRect game_over_rect = { WINDOW_WIDTH / 4, WINDOW_HEIGHT / 2 - 60, WINDOW_WIDTH / 2, 50 };
         SDL_RenderFillRect(game->renderer, &game_over_rect);
+        
+        // Score display
+        SDL_SetRenderDrawColor(game->renderer, 255, 255, 255, 255);
+        render_number(game->renderer, game->platforms_landed, WINDOW_WIDTH / 2 - 20, WINDOW_HEIGHT / 2 + 10, 3.0f);
+        
+        // Restart hint - simple "R" using rectangles
+        SDL_FRect r_rects[] = {
+            {WINDOW_WIDTH / 2 - 10, WINDOW_HEIGHT / 2 + 60, 2, 12}, // Vertical line
+            {WINDOW_WIDTH / 2 - 8, WINDOW_HEIGHT / 2 + 60, 6, 2},  // Top horizontal
+            {WINDOW_WIDTH / 2 - 8, WINDOW_HEIGHT / 2 + 66, 6, 2},  // Middle horizontal
+            {WINDOW_WIDTH / 2 - 4, WINDOW_HEIGHT / 2 + 62, 2, 4},  // Middle vertical
+            {WINDOW_WIDTH / 2 - 6, WINDOW_HEIGHT / 2 + 68, 4, 4}   // Bottom diagonal
+        };
+        for (int i = 0; i < 5; i++) {
+            SDL_RenderFillRect(game->renderer, &r_rects[i]);
+        }
     }
     
     SDL_RenderPresent(game->renderer);
