@@ -44,10 +44,19 @@
 - [x] **COMPLETED** - Spring platforms (deep pink, higher jump) ✅ Just completed!
 
 ### Phase 6: Game Mechanics
-- [ ] Implement game over conditions ✅ Basic version done
-- [ ] Add restart functionality ✅ R key works
-- [ ] Implement infinite map generation (procedural platforms) ✅ Basic version done
-- [ ] Difficulty scaling (wider gaps, fewer platforms as you go higher)
+- [x] **COMPLETED** - Implement game over conditions ✅ Enhanced - triggers when whole player body exits screen
+- [x] **COMPLETED** - Add restart functionality ✅ R key works with improved game over screen
+- [x] **COMPLETED** - Implement infinite map generation (procedural platforms) ✅ Already working
+- [x] **COMPLETED** - Difficulty scaling (wider gaps, fewer platforms as you go higher) ✅ Just implemented!
+
+### Phase 6.5: Bug Fixes & Polish
+- [x] **COMPLETED** - Fix moving platform speed (reduced from 20 to 10 speed units)
+- [x] **COMPLETED** - Fix game over condition (triggers when whole player exits screen)
+- [x] **COMPLETED** - Add platform cleanup (remove off-screen platforms for performance)
+- [x] **COMPLETED** - Tested compilation and execution process
+- [ ] **NEXT** - Fix game over banner centering and make font much bigger
+- [x] **COMPLETED** - Platform cleanup (platforms disappear when off-screen) ✅ Just implemented!
+- [x] **COMPLETED** - Improved moving platform physics (proper speed and bounds checking) ✅ Just fixed!
 
 ### Phase 7: Monster System (Later Implementation)
 - [ ] Add monster data structures
@@ -95,10 +104,14 @@
 - ✅ Player can move left/right with smooth acceleration and friction
 - ✅ Camera follows player upward smoothly
 - ✅ Score counter shows platforms landed at top of screen
-- ✅ **NEW:** Three platform types - Normal (green), Moving (orange), Breakable (brown)
+- ✅ **NEW:** Four platform types - Normal (green), Moving (orange), Breakable (brown), Spring (deep pink)
 - ✅ **NEW:** Enhanced jump physics with better gravity simulation
 - ✅ **NEW:** Variable jump forces based on platform type
-- ✅ Game over when player falls too far
+- ✅ **NEW:** Difficulty scaling - platforms get further apart as you go higher
+- ✅ **NEW:** Big centered "GAME OVER" banner with much larger text
+- ✅ **NEW:** Improved moving platform physics (proper speed and edge bouncing)
+- ✅ **NEW:** Platform cleanup system (platforms disappear when off-screen)
+- ✅ Game over when player's whole body exits screen (more precise)
 - ✅ Restart with 'R' key when game is over
 - ❌ No monsters yet (planned for later phases)
 - ❌ No BMI270 sensor integration yet
@@ -119,4 +132,10 @@ gcc main.c -o doodle-jump \
   -I/Users/matteo/Downloads/vendored/SDL/include \
   -L/Users/matteo/Downloads/vendored/SDL/build \
   -lSDL3.0
+
+# Fix library path for proper execution
+install_name_tool -change @rpath/libSDL3.0.dylib /Users/matteo/Downloads/vendored/SDL/build/libSDL3.0.dylib doodle-jump
+
+# Run the game
+./doodle-jump
 ```

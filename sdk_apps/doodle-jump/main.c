@@ -293,12 +293,24 @@ void update_game(GameState *game, float delta_time) {
         
         // Update moving platforms
         if (platform->type == PLATFORM_MOVING) {
-            platform->x += platform->move_direction * 50.0f * delta_time;
+            platform->x += platform->move_direction * 50.0f * delta_time; // Reduced from 100 to 50
             
-            // Bounce off screen edges
-            if (platform->x <= 0 || platform->x + platform->width >= WINDOW_WIDTH) {
-                platform->move_direction *= -1;
+            // Bounce off screen edges with proper bounds checking
+            if (platform->x <= 0) {
+                platform->x = 0;
+                platform->move_direction = 1.0f; // Move right
+            } else if (platform->x + platform->width >= WINDOW_WIDTH) {
+                platform->x = WINDOW_WIDTH - platform->width;
+                platform->move_direction = -1.0f; // Move left
             }
+        }
+    }
+    
+    // Deactivate platforms that are too far below the camera (off-screen cleanup)
+    for (int i = 0; i < game->num_platforms; i++) {
+        Platform *platform = &game->platforms[i];
+        if (platform->active && platform->y > game->camera_y + WINDOW_HEIGHT + 200) {
+            platform->active = false; // Deactivate platforms far below screen
         }
     }
     
@@ -344,8 +356,8 @@ void update_game(GameState *game, float delta_time) {
         game->score = new_score;
     }
     
-    // Game over if player falls too far below camera
-    if (player->y > game->camera_y + WINDOW_HEIGHT + 100) {
+    // Game over if player falls completely off screen (whole body exits screen)
+    if (player->y > game->camera_y + WINDOW_HEIGHT) {
         game->game_running = false;
     }
 }
@@ -485,32 +497,137 @@ void render_game(GameState *game) {
     // Render the actual number using our render_number function
     render_number(game->renderer, game->platforms_landed, 80, 10, 3.0f);
     
-    // Game over screen with better text
+    // Game over screen with big banner
     if (!game->game_running) {
-        // Semi-transparent background
-        SDL_SetRenderDrawColor(game->renderer, 0, 0, 0, 180);
+        // Semi-transparent background overlay
+        SDL_SetRenderDrawColor(game->renderer, 0, 0, 0, 200);
         SDL_FRect overlay = { 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT };
         SDL_RenderFillRect(game->renderer, &overlay);
         
-        // Game Over box
+        // Large "GAME OVER" banner using rectangles
         SDL_SetRenderDrawColor(game->renderer, 255, 0, 0, 255);
-        SDL_FRect game_over_rect = { WINDOW_WIDTH / 4, WINDOW_HEIGHT / 2 - 60, WINDOW_WIDTH / 2, 50 };
-        SDL_RenderFillRect(game->renderer, &game_over_rect);
         
-        // Score display
-        SDL_SetRenderDrawColor(game->renderer, 255, 255, 255, 255);
-        render_number(game->renderer, game->platforms_landed, WINDOW_WIDTH / 2 - 20, WINDOW_HEIGHT / 2 + 10, 3.0f);
+        int char_size = 16; // Much bigger characters (increased from 8)
+        int banner_y = WINDOW_HEIGHT / 2 - char_size * 2; // Center vertically
         
-        // Restart hint - simple "R" using rectangles
+        // Calculate total width to center the text
+        int total_width = 8 * char_size * 4; // Approximate total width for "GAME OVER"
+        int start_x = (WINDOW_WIDTH - total_width) / 2;
+        
+        // G
+        SDL_FRect g_rects[] = {
+            {start_x, banner_y, char_size * 3, char_size}, // Top
+            {start_x, banner_y, char_size, char_size * 4}, // Left side
+            {start_x, banner_y + char_size * 3, char_size * 3, char_size}, // Bottom
+            {start_x + char_size * 2, banner_y + char_size, char_size, char_size * 2}, // Right side middle
+            {start_x + char_size, banner_y + char_size * 2, char_size, char_size} // Middle bar
+        };
+        for (int i = 0; i < 5; i++) {
+            SDL_RenderFillRect(game->renderer, &g_rects[i]);
+        }
+        start_x += char_size * 4;
+        
+        // A
+        SDL_FRect a_rects[] = {
+            {start_x, banner_y, char_size * 3, char_size}, // Top
+            {start_x, banner_y, char_size, char_size * 4}, // Left side
+            {start_x + char_size * 2, banner_y, char_size, char_size * 4}, // Right side
+            {start_x, banner_y + char_size * 2, char_size * 3, char_size} // Middle bar
+        };
+        for (int i = 0; i < 4; i++) {
+            SDL_RenderFillRect(game->renderer, &a_rects[i]);
+        }
+        start_x += char_size * 4;
+        
+        // M
+        SDL_FRect m_rects[] = {
+            {start_x, banner_y, char_size, char_size * 4}, // Left side
+            {start_x + char_size * 2, banner_y, char_size, char_size * 4}, // Right side
+            {start_x + char_size, banner_y, char_size, char_size * 2} // Middle
+        };
+        for (int i = 0; i < 3; i++) {
+            SDL_RenderFillRect(game->renderer, &m_rects[i]);
+        }
+        start_x += char_size * 4;
+        
+        // E
+        SDL_FRect e_rects[] = {
+            {start_x, banner_y, char_size * 3, char_size}, // Top
+            {start_x, banner_y, char_size, char_size * 4}, // Left side
+            {start_x, banner_y + char_size * 2, char_size * 2, char_size}, // Middle
+            {start_x, banner_y + char_size * 3, char_size * 3, char_size} // Bottom
+        };
+        for (int i = 0; i < 4; i++) {
+            SDL_RenderFillRect(game->renderer, &e_rects[i]);
+        }
+        start_x += char_size * 5;
+        
+        // O
+        SDL_FRect o_rects[] = {
+            {start_x, banner_y, char_size * 3, char_size}, // Top
+            {start_x, banner_y, char_size, char_size * 4}, // Left side
+            {start_x + char_size * 2, banner_y, char_size, char_size * 4}, // Right side
+            {start_x, banner_y + char_size * 3, char_size * 3, char_size} // Bottom
+        };
+        for (int i = 0; i < 4; i++) {
+            SDL_RenderFillRect(game->renderer, &o_rects[i]);
+        }
+        start_x += char_size * 4;
+        
+        // V
+        SDL_FRect v_rects[] = {
+            {start_x, banner_y, char_size, char_size * 3}, // Left side
+            {start_x + char_size * 2, banner_y, char_size, char_size * 3}, // Right side
+            {start_x + char_size, banner_y + char_size * 3, char_size, char_size} // Bottom point
+        };
+        for (int i = 0; i < 3; i++) {
+            SDL_RenderFillRect(game->renderer, &v_rects[i]);
+        }
+        start_x += char_size * 4;
+        
+        // E
+        SDL_FRect e2_rects[] = {
+            {start_x, banner_y, char_size * 3, char_size}, // Top
+            {start_x, banner_y, char_size, char_size * 4}, // Left side
+            {start_x, banner_y + char_size * 2, char_size * 2, char_size}, // Middle
+            {start_x, banner_y + char_size * 3, char_size * 3, char_size} // Bottom
+        };
+        for (int i = 0; i < 4; i++) {
+            SDL_RenderFillRect(game->renderer, &e2_rects[i]);
+        }
+        start_x += char_size * 4;
+        
+        // R
         SDL_FRect r_rects[] = {
-            {WINDOW_WIDTH / 2 - 10, WINDOW_HEIGHT / 2 + 60, 2, 12}, // Vertical line
-            {WINDOW_WIDTH / 2 - 8, WINDOW_HEIGHT / 2 + 60, 6, 2},  // Top horizontal
-            {WINDOW_WIDTH / 2 - 8, WINDOW_HEIGHT / 2 + 66, 6, 2},  // Middle horizontal
-            {WINDOW_WIDTH / 2 - 4, WINDOW_HEIGHT / 2 + 62, 2, 4},  // Middle vertical
-            {WINDOW_WIDTH / 2 - 6, WINDOW_HEIGHT / 2 + 68, 4, 4}   // Bottom diagonal
+            {start_x, banner_y, char_size * 3, char_size}, // Top
+            {start_x, banner_y, char_size, char_size * 4}, // Left side
+            {start_x + char_size * 2, banner_y, char_size, char_size * 2}, // Right side top
+            {start_x, banner_y + char_size * 2, char_size * 2, char_size}, // Middle
+            {start_x + char_size, banner_y + char_size * 2, char_size * 2, char_size * 2} // Bottom diagonal
         };
         for (int i = 0; i < 5; i++) {
             SDL_RenderFillRect(game->renderer, &r_rects[i]);
+        }
+        
+        // Score display below banner
+        SDL_SetRenderDrawColor(game->renderer, 255, 255, 255, 255);
+        render_number(game->renderer, game->platforms_landed, WINDOW_WIDTH / 2 - 30, WINDOW_HEIGHT / 2 + 60, 5.0f);
+        
+        // Restart hint - "PRESS R" 
+        SDL_SetRenderDrawColor(game->renderer, 255, 255, 0, 255); // Yellow
+        int hint_y = WINDOW_HEIGHT / 2 + 120;
+        int hint_size = 6;
+        start_x = WINDOW_WIDTH / 2 - 12; // Center the R
+        
+        // Simple "R" for restart hint
+        SDL_FRect hint_r_rects[] = {
+            {start_x, hint_y, hint_size * 2, hint_size}, // Top
+            {start_x, hint_y, hint_size, hint_size * 3}, // Left side
+            {start_x + hint_size, hint_y + hint_size, hint_size, hint_size}, // Middle
+            {start_x + hint_size, hint_y + hint_size * 2, hint_size * 2, hint_size} // Bottom diagonal
+        };
+        for (int i = 0; i < 4; i++) {
+            SDL_RenderFillRect(game->renderer, &hint_r_rects[i]);
         }
     }
     
