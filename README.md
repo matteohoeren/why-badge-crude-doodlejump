@@ -3,6 +3,10 @@ However you might still have a little fun with it.
 
 Right now it is a crude doodle jump game and it might be further developed ;)
 
+Find the actual app in sdk_apps/doodle-jump
+
+Refer to the WHY2025 Wiki on how to install a firmware/app in your badge.
+
 Here is the original BadgeVMS Readme:
 
 # Welcome to BadgeVMS
