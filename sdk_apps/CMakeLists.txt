@@ -244,8 +244,6 @@ build_app(why2025_namebadge
     SOURCES
      main.c
      image.c
-    LIBRARIES
-     sdl3
 )
 
 #build_app(doomgeneric
