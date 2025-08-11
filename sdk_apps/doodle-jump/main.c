@@ -20,10 +20,10 @@
 #define PLATFORM_WIDTH         80
 #define PLATFORM_HEIGHT        15
 #define MAX_PLATFORMS          100
-#define PLATFORM_SPACING_MIN   80
-#define PLATFORM_SPACING_MAX   120
+#define PLATFORM_SPACING_MIN   70
+#define PLATFORM_SPACING_MAX   110
 #define GRAVITY                0.8f
-#define JUMP_FORCE            -15.0f
+#define JUMP_FORCE            -18.0f
 #define SPRING_JUMP_FORCE     -22.0f
 #define PLAYER_SPEED           6.0f
 #define PLAYER_ACCELERATION    0.3f
@@ -44,6 +44,7 @@ typedef struct {
     PlatformType type;
     bool active;
     float move_direction; // For moving platforms
+    float move_speed; // Speed for moving platforms
 } Platform;
 
 // Player structure
@@ -72,6 +73,7 @@ typedef struct {
 // Function declarations
 void init_game(GameState *game);
 void generate_platforms(GameState *game);
+void generate_new_platforms(GameState *game);
 void update_game(GameState *game, float delta_time);
 void render_game(GameState *game);
 void handle_input(GameState *game, const bool *keyboard_state, float delta_time);
@@ -81,9 +83,9 @@ void render_number(SDL_Renderer *renderer, int number, float x, float y, float s
 
 // Initialize the game state
 void init_game(GameState *game) {
-    // Initialize player
+    // Initialize player - position above starting platform
     game->player.x = WINDOW_WIDTH / 2 - PLAYER_WIDTH / 2;
-    game->player.y = WINDOW_HEIGHT - 100;
+    game->player.y = WINDOW_HEIGHT - PLATFORM_HEIGHT - 50 - PLAYER_HEIGHT - 5; // Above starting platform
     game->player.vx = 0;
     game->player.vy = 0;
     game->player.width = PLAYER_WIDTH;
@@ -105,20 +107,21 @@ void init_game(GameState *game) {
 void generate_platforms(GameState *game) {
     game->num_platforms = 0;
     
-    // Add a starting platform at the bottom
+    // Add a starting platform at the bottom - always clearly visible with good padding
     Platform *start_platform = &game->platforms[game->num_platforms++];
     start_platform->x = WINDOW_WIDTH / 2 - PLATFORM_WIDTH / 2;
-    start_platform->y = WINDOW_HEIGHT - 50;
+    start_platform->y = WINDOW_HEIGHT - PLATFORM_HEIGHT - 50; // 50px offset from bottom for better visibility
     start_platform->width = PLATFORM_WIDTH;
     start_platform->height = PLATFORM_HEIGHT;
     start_platform->type = PLATFORM_NORMAL;
     start_platform->active = true;
     start_platform->move_direction = 0;
+    start_platform->move_speed = 0;
     
     // Generate platforms going upward
     float current_y = start_platform->y - PLATFORM_SPACING_MIN;
     
-    for (int i = 1; i < MAX_PLATFORMS && current_y > -2000; i++) {
+    for (int i = 1; i < MAX_PLATFORMS && current_y > -1000; i++) {
         Platform *platform = &game->platforms[game->num_platforms++];
         
         // Random horizontal position
@@ -132,15 +135,20 @@ void generate_platforms(GameState *game) {
         if (rand_type < 85) {
             platform->type = PLATFORM_NORMAL;
             platform->move_direction = 0;
+            platform->move_speed = 0;
         } else if (rand_type < 90) {
             platform->type = PLATFORM_MOVING;
             platform->move_direction = (SDL_rand(2) == 0) ? 1.0f : -1.0f; // Random direction
+            // Random speed between 0.5x and 1.25x (reduced by factor of 4)
+            platform->move_speed = 0.5f + (float)(SDL_rand(15)) / 20.0f; // 0.5f to 1.25f
         } else if (rand_type < 95) {
             platform->type = PLATFORM_BREAKABLE;
             platform->move_direction = 0;
+            platform->move_speed = 0;
         } else {
             platform->type = PLATFORM_SPRING;
             platform->move_direction = 0;
+            platform->move_speed = 0;
         }
         
         platform->active = true;
@@ -148,12 +156,92 @@ void generate_platforms(GameState *game) {
         // Move to next platform position with difficulty scaling
         // As we go higher (more negative Y), increase spacing between platforms
         float height_factor = (-current_y) / 500.0f; // Difficulty increases every 500 units
-        int additional_spacing = (int)(height_factor * 20); // Up to 20 extra pixels per difficulty level
+        int additional_spacing = (int)(height_factor * 15); // Reduced from 20 to 15 for easier jumps
         
         // Clamp the additional spacing to prevent impossible gaps
-        if (additional_spacing > 40) additional_spacing = 40;
+        if (additional_spacing > 30) additional_spacing = 30; // Reduced from 40 to 30
         
         current_y -= PLATFORM_SPACING_MIN + (SDL_rand(PLATFORM_SPACING_MAX - PLATFORM_SPACING_MIN)) + additional_spacing;
+    }
+}
+
+// Generate new platforms as the player moves upward (infinite generation)
+void generate_new_platforms(GameState *game) {
+    // Find the highest platform
+    float highest_y = game->camera_y; // Start with camera position
+    for (int i = 0; i < game->num_platforms; i++) {
+        if (game->platforms[i].active && game->platforms[i].y < highest_y) {
+            highest_y = game->platforms[i].y;
+        }
+    }
+    
+    // Generate new platforms if we need more above the highest point
+    float target_height = game->camera_y - WINDOW_HEIGHT - 200; // Generate well above camera
+    float current_y = highest_y - PLATFORM_SPACING_MIN;
+    
+    while (current_y > target_height && game->num_platforms < MAX_PLATFORMS) {
+        // Find an inactive platform slot to reuse
+        int slot = -1;
+        for (int i = 0; i < game->num_platforms; i++) {
+            if (!game->platforms[i].active) {
+                slot = i;
+                break;
+            }
+        }
+        
+        // If no inactive slot, try to add a new one
+        if (slot == -1 && game->num_platforms < MAX_PLATFORMS) {
+            slot = game->num_platforms++;
+        }
+        
+        // If we found a slot, create a new platform
+        if (slot != -1) {
+            Platform *platform = &game->platforms[slot];
+            
+            // Random horizontal position
+            platform->x = (float)(SDL_rand(WINDOW_WIDTH - (int)PLATFORM_WIDTH));
+            platform->y = current_y;
+            platform->width = PLATFORM_WIDTH;
+            platform->height = PLATFORM_HEIGHT;
+            
+            // Randomly assign platform types (85% normal, 5% moving, 5% breakable, 5% spring)
+            int rand_type = SDL_rand(100);
+            if (rand_type < 85) {
+                platform->type = PLATFORM_NORMAL;
+                platform->move_direction = 0;
+                platform->move_speed = 0;
+            } else if (rand_type < 90) {
+                platform->type = PLATFORM_MOVING;
+                platform->move_direction = (SDL_rand(2) == 0) ? 1.0f : -1.0f; // Random direction
+                // Random speed between 0.5x and 1.25x, factoring in score (reduced by factor of 4)
+                float base_speed = 0.5f + (float)(SDL_rand(15)) / 20.0f; // 0.5f to 1.25f
+                float score_multiplier = 1.0f + (float)game->score / 200.0f; // Gradual increase
+                platform->move_speed = base_speed * score_multiplier;
+            } else if (rand_type < 95) {
+                platform->type = PLATFORM_BREAKABLE;
+                platform->move_direction = 0;
+                platform->move_speed = 0;
+            } else {
+                platform->type = PLATFORM_SPRING;
+                platform->move_direction = 0;
+                platform->move_speed = 0;
+            }
+            
+            platform->active = true;
+            
+            // Move to next platform position with difficulty scaling
+            // As we go higher (more negative Y), increase spacing between platforms
+            float height_factor = (-current_y) / 500.0f; // Difficulty increases every 500 units
+            int additional_spacing = (int)(height_factor * 15); // Reduced from 20 to 15 for easier jumps
+            
+            // Clamp the additional spacing to prevent impossible gaps
+            if (additional_spacing > 30) additional_spacing = 30; // Reduced from 40 to 30
+            
+            current_y -= PLATFORM_SPACING_MIN + (SDL_rand(PLATFORM_SPACING_MAX - PLATFORM_SPACING_MIN)) + additional_spacing;
+        } else {
+            // No more slots available, break out
+            break;
+        }
     }
 }
 
@@ -257,8 +345,10 @@ void render_number(SDL_Renderer *renderer, int number, float x, float y, float s
 
 // Update camera to follow the player
 void update_camera(GameState *game) {
-    // Keep camera centered on player, but only move up
-    float target_camera_y = game->player.y - WINDOW_HEIGHT / 2;
+    // Keep camera positioned to show platforms below player
+    // Increased offset to keep more platforms visible below
+    float camera_offset = 50.0f + PLATFORM_HEIGHT; // Increased from 20.0f to 50.0f
+    float target_camera_y = game->player.y - WINDOW_HEIGHT / 2 + camera_offset;
     
     // Only move camera up (never down)
     if (target_camera_y < game->camera_y) {
@@ -293,7 +383,11 @@ void update_game(GameState *game, float delta_time) {
         
         // Update moving platforms
         if (platform->type == PLATFORM_MOVING) {
-            platform->x += platform->move_direction * 50.0f * delta_time; // Reduced from 100 to 50
+            // Factor in score for increased speed (1.0 + score/100 gives gradual speed increase)
+            float score_multiplier = 1.0f + (float)game->score / 100.0f;
+            float actual_speed = platform->move_speed * score_multiplier;
+            
+            platform->x += platform->move_direction * actual_speed * delta_time;
             
             // Bounce off screen edges with proper bounds checking
             if (platform->x <= 0) {
@@ -313,6 +407,9 @@ void update_game(GameState *game, float delta_time) {
             platform->active = false; // Deactivate platforms far below screen
         }
     }
+    
+    // Generate new platforms as needed for infinite gameplay
+    generate_new_platforms(game);
     
     // Check platform collisions
     player->on_ground = false;
@@ -350,7 +447,7 @@ void update_game(GameState *game, float delta_time) {
     // Update camera
     update_camera(game);
     
-    // Update score based on height
+    // Update score based on height (platforms passed)
     int new_score = (int)(-game->camera_y / 10);
     if (new_score > game->score) {
         game->score = new_score;
@@ -494,8 +591,8 @@ void render_game(GameState *game) {
         SDL_RenderFillRect(game->renderer, &colon_rects[i]);
     }
     
-    // Render the actual number using our render_number function
-    render_number(game->renderer, game->platforms_landed, 80, 10, 3.0f);
+    // Render the actual score using our render_number function
+    render_number(game->renderer, game->score, 80, 10, 3.0f);
     
     // Game over screen with big banner
     if (!game->game_running) {
@@ -611,7 +708,7 @@ void render_game(GameState *game) {
         
         // Score display below banner
         SDL_SetRenderDrawColor(game->renderer, 255, 255, 255, 255);
-        render_number(game->renderer, game->platforms_landed, WINDOW_WIDTH / 2 - 30, WINDOW_HEIGHT / 2 + 60, 5.0f);
+        render_number(game->renderer, game->score, WINDOW_WIDTH / 2 - 30, WINDOW_HEIGHT / 2 + 60, 5.0f);
         
         // Restart hint - "PRESS R" 
         SDL_SetRenderDrawColor(game->renderer, 255, 255, 0, 255); // Yellow
