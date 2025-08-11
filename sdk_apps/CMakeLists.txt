@@ -124,6 +124,11 @@ build_app(hello
      main.c
 )
 
+build_app(doodle-jump
+    SOURCES 
+     main.c
+)
+
 #build_app(bench_basic_a
 #    SOURCES 
 #     bench_basic_a.c
