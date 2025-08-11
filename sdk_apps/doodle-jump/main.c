@@ -13,8 +13,8 @@
 #include <SDL3/SDL_main.h>
 
 // Game constants
-#define WINDOW_WIDTH           480
-#define WINDOW_HEIGHT          640
+#define WINDOW_WIDTH           576
+#define WINDOW_HEIGHT          432
 #define PLAYER_WIDTH           20
 #define PLAYER_HEIGHT          20
 #define PLATFORM_WIDTH         80
@@ -22,15 +22,19 @@
 #define MAX_PLATFORMS          100
 #define PLATFORM_SPACING_MIN   80
 #define PLATFORM_SPACING_MAX   120
-#define GRAVITY                0.5f
-#define JUMP_FORCE            -12.0f
-#define PLAYER_SPEED           5.0f
+#define GRAVITY                0.8f
+#define JUMP_FORCE            -15.0f
+#define SPRING_JUMP_FORCE     -22.0f
+#define PLAYER_SPEED           6.0f
+#define PLAYER_ACCELERATION    0.3f
+#define PLAYER_FRICTION        0.85f
 
 // Platform types
 typedef enum {
     PLATFORM_NORMAL = 0,
     PLATFORM_MOVING,
-    PLATFORM_BREAKABLE
+    PLATFORM_BREAKABLE,
+    PLATFORM_SPRING
 } PlatformType;
 
 // Platform structure
@@ -59,6 +63,8 @@ typedef struct {
     int num_platforms;
     float camera_y; // Camera position for scrolling
     int score;
+    int platforms_landed; // Count of platforms landed on
+    int last_platform_landed; // Index of last platform landed on to avoid double counting
     bool game_running;
     Uint64 last_time;
 } GameState;
@@ -68,9 +74,10 @@ void init_game(GameState *game);
 void generate_platforms(GameState *game);
 void update_game(GameState *game, float delta_time);
 void render_game(GameState *game);
-void handle_input(GameState *game, const bool *keyboard_state);
+void handle_input(GameState *game, const bool *keyboard_state, float delta_time);
 void update_camera(GameState *game);
 bool check_platform_collision(Player *player, Platform *platform);
+void render_number(SDL_Renderer *renderer, int number, float x, float y, float scale);
 
 // Initialize the game state
 void init_game(GameState *game) {
@@ -86,6 +93,8 @@ void init_game(GameState *game) {
     // Initialize camera
     game->camera_y = 0;
     game->score = 0;
+    game->platforms_landed = 0;
+    game->last_platform_landed = -1;
     game->game_running = true;
     
     // Generate initial platforms
@@ -117,9 +126,24 @@ void generate_platforms(GameState *game) {
         platform->y = current_y;
         platform->width = PLATFORM_WIDTH;
         platform->height = PLATFORM_HEIGHT;
-        platform->type = PLATFORM_NORMAL; // Only normal platforms for now
+        
+        // Randomly assign platform types (85% normal, 5% moving, 5% breakable, 5% spring)
+        int rand_type = SDL_rand(100);
+        if (rand_type < 85) {
+            platform->type = PLATFORM_NORMAL;
+            platform->move_direction = 0;
+        } else if (rand_type < 90) {
+            platform->type = PLATFORM_MOVING;
+            platform->move_direction = (SDL_rand(2) == 0) ? 1.0f : -1.0f; // Random direction
+        } else if (rand_type < 95) {
+            platform->type = PLATFORM_BREAKABLE;
+            platform->move_direction = 0;
+        } else {
+            platform->type = PLATFORM_SPRING;
+            platform->move_direction = 0;
+        }
+        
         platform->active = true;
-        platform->move_direction = 0;
         
         // Move to next platform position
         current_y -= PLATFORM_SPACING_MIN + (SDL_rand(PLATFORM_SPACING_MAX - PLATFORM_SPACING_MIN));
@@ -146,6 +170,82 @@ bool check_platform_collision(Player *player, Platform *platform) {
     }
     
     return false;
+}
+
+// Render a number using simple pixel patterns
+void render_number(SDL_Renderer *renderer, int number, float x, float y, float scale) {
+    // Define digit patterns as 3x5 bitmaps
+    static const unsigned char digit_patterns[10][5] = {
+        // 0
+        {0b111, 0b101, 0b101, 0b101, 0b111},
+        // 1
+        {0b010, 0b110, 0b010, 0b010, 0b111},
+        // 2
+        {0b111, 0b001, 0b111, 0b100, 0b111},
+        // 3
+        {0b111, 0b001, 0b111, 0b001, 0b111},
+        // 4
+        {0b101, 0b101, 0b111, 0b001, 0b001},
+        // 5
+        {0b111, 0b100, 0b111, 0b001, 0b111},
+        // 6
+        {0b111, 0b100, 0b111, 0b101, 0b111},
+        // 7
+        {0b111, 0b001, 0b001, 0b001, 0b001},
+        // 8
+        {0b111, 0b101, 0b111, 0b101, 0b111},
+        // 9
+        {0b111, 0b101, 0b111, 0b001, 0b111}
+    };
+    
+    if (number == 0) {
+        // Special case for 0
+        const unsigned char *pattern = digit_patterns[0];
+        for (int row = 0; row < 5; row++) {
+            for (int col = 0; col < 3; col++) {
+                if (pattern[row] & (1 << (2 - col))) {
+                    SDL_FRect pixel = {
+                        x + col * scale,
+                        y + row * scale,
+                        scale,
+                        scale
+                    };
+                    SDL_RenderFillRect(renderer, &pixel);
+                }
+            }
+        }
+        return;
+    }
+    
+    // Convert number to string to render digits
+    char buffer[16];
+    snprintf(buffer, sizeof(buffer), "%d", number);
+    
+    float current_x = x;
+    for (int i = 0; buffer[i] != '\0'; i++) {
+        int digit = buffer[i] - '0';
+        if (digit >= 0 && digit <= 9) {
+            const unsigned char *pattern = digit_patterns[digit];
+            
+            // Render the digit
+            for (int row = 0; row < 5; row++) {
+                for (int col = 0; col < 3; col++) {
+                    if (pattern[row] & (1 << (2 - col))) {
+                        SDL_FRect pixel = {
+                            current_x + col * scale,
+                            y + row * scale,
+                            scale,
+                            scale
+                        };
+                        SDL_RenderFillRect(renderer, &pixel);
+                    }
+                }
+            }
+        }
+        
+        // Move to next digit position (3 pixels + 1 space)
+        current_x += 4 * scale;
+    }
 }
 
 // Update camera to follow the player
@@ -179,13 +279,51 @@ void update_game(GameState *game, float delta_time) {
         player->x = -player->width;
     }
     
+    // Update platforms
+    for (int i = 0; i < game->num_platforms; i++) {
+        Platform *platform = &game->platforms[i];
+        if (!platform->active) continue;
+        
+        // Update moving platforms
+        if (platform->type == PLATFORM_MOVING) {
+            platform->x += platform->move_direction * 50.0f * delta_time;
+            
+            // Bounce off screen edges
+            if (platform->x <= 0 || platform->x + platform->width >= WINDOW_WIDTH) {
+                platform->move_direction *= -1;
+            }
+        }
+    }
+    
     // Check platform collisions
     player->on_ground = false;
     for (int i = 0; i < game->num_platforms; i++) {
         if (check_platform_collision(player, &game->platforms[i])) {
-            player->y = game->platforms[i].y - player->height;
-            player->vy = JUMP_FORCE; // Automatic jump
+            Platform *platform = &game->platforms[i];
+            
+            player->y = platform->y - player->height;
+            
+            // Different jump forces for different platform types
+            float jump_force = JUMP_FORCE;
+            if (platform->type == PLATFORM_MOVING) {
+                jump_force = JUMP_FORCE * 1.1f; // Slightly higher jump for moving platforms
+            } else if (platform->type == PLATFORM_SPRING) {
+                jump_force = SPRING_JUMP_FORCE; // Much higher jump for spring platforms
+            }
+            
+            player->vy = jump_force;
             player->on_ground = true;
+            
+            // Handle breakable platforms
+            if (platform->type == PLATFORM_BREAKABLE) {
+                platform->active = false; // Platform breaks after being used
+            }
+            
+            // Increment platforms landed counter if this is a new platform
+            if (i != game->last_platform_landed) {
+                game->platforms_landed++;
+                game->last_platform_landed = i;
+            }
             break;
         }
     }
@@ -206,18 +344,26 @@ void update_game(GameState *game, float delta_time) {
 }
 
 // Handle player input
-void handle_input(GameState *game, const bool *keyboard_state) {
+void handle_input(GameState *game, const bool *keyboard_state, float delta_time) {
     Player *player = &game->player;
     
-    // Reset horizontal velocity
-    player->vx = 0;
+    // Horizontal movement with acceleration
+    float target_vx = 0;
     
     // Left/Right movement
     if (keyboard_state[SDL_SCANCODE_LEFT] || keyboard_state[SDL_SCANCODE_A]) {
-        player->vx = -PLAYER_SPEED;
+        target_vx = -PLAYER_SPEED;
     }
     if (keyboard_state[SDL_SCANCODE_RIGHT] || keyboard_state[SDL_SCANCODE_D]) {
-        player->vx = PLAYER_SPEED;
+        target_vx = PLAYER_SPEED;
+    }
+    
+    // Apply acceleration towards target velocity
+    if (target_vx != 0) {
+        player->vx += (target_vx - player->vx) * PLAYER_ACCELERATION * delta_time;
+    } else {
+        // Apply friction when no input
+        player->vx *= PLAYER_FRICTION;
     }
     
     // Restart game
@@ -233,10 +379,25 @@ void render_game(GameState *game) {
     SDL_RenderClear(game->renderer);
     
     // Render platforms
-    SDL_SetRenderDrawColor(game->renderer, 34, 139, 34, 255); // Forest green
     for (int i = 0; i < game->num_platforms; i++) {
         Platform *platform = &game->platforms[i];
         if (!platform->active) continue;
+        
+        // Set color based on platform type
+        switch (platform->type) {
+            case PLATFORM_NORMAL:
+                SDL_SetRenderDrawColor(game->renderer, 34, 139, 34, 255); // Forest green
+                break;
+            case PLATFORM_MOVING:
+                SDL_SetRenderDrawColor(game->renderer, 255, 165, 0, 255); // Orange
+                break;
+            case PLATFORM_BREAKABLE:
+                SDL_SetRenderDrawColor(game->renderer, 139, 69, 19, 255); // Brown
+                break;
+            case PLATFORM_SPRING:
+                SDL_SetRenderDrawColor(game->renderer, 255, 20, 147, 255); // Deep pink
+                break;
+        }
         
         // Convert world coordinates to screen coordinates
         SDL_FRect rect = {
@@ -262,13 +423,60 @@ void render_game(GameState *game) {
     };
     SDL_RenderFillRect(game->renderer, &player_rect);
     
-    // Render score (simple text approximation with rectangles)
-    // For now, just render score as a simple indicator
+    // Render score - display platforms landed count at top of screen
     SDL_SetRenderDrawColor(game->renderer, 255, 255, 255, 255);
-    for (int i = 0; i < game->score / 10 && i < 50; i++) {
-        SDL_FRect score_rect = { 10 + i * 2, 10, 1, 10 };
-        SDL_RenderFillRect(game->renderer, &score_rect);
+    
+    // Simple "SCORE:" text using rectangles
+    // S
+    SDL_FRect s_rects[] = {
+        {10, 10, 8, 2}, {10, 10, 2, 4}, {10, 14, 6, 2}, {16, 14, 2, 4}, {10, 18, 8, 2}
+    };
+    for (int i = 0; i < 5; i++) {
+        SDL_RenderFillRect(game->renderer, &s_rects[i]);
     }
+    
+    // C
+    SDL_FRect c_rects[] = {
+        {22, 10, 8, 2}, {22, 10, 2, 10}, {22, 18, 8, 2}
+    };
+    for (int i = 0; i < 3; i++) {
+        SDL_RenderFillRect(game->renderer, &c_rects[i]);
+    }
+    
+    // O
+    SDL_FRect o_rects[] = {
+        {34, 10, 8, 2}, {34, 10, 2, 10}, {40, 10, 2, 10}, {34, 18, 8, 2}
+    };
+    for (int i = 0; i < 4; i++) {
+        SDL_RenderFillRect(game->renderer, &o_rects[i]);
+    }
+    
+    // R
+    SDL_FRect r_rects[] = {
+        {46, 10, 8, 2}, {46, 10, 2, 10}, {52, 10, 2, 4}, {46, 14, 6, 2}, {50, 14, 4, 6}
+    };
+    for (int i = 0; i < 5; i++) {
+        SDL_RenderFillRect(game->renderer, &r_rects[i]);
+    }
+    
+    // E
+    SDL_FRect e_rects[] = {
+        {58, 10, 8, 2}, {58, 10, 2, 10}, {58, 14, 6, 2}, {58, 18, 8, 2}
+    };
+    for (int i = 0; i < 4; i++) {
+        SDL_RenderFillRect(game->renderer, &e_rects[i]);
+    }
+    
+    // :
+    SDL_FRect colon_rects[] = {
+        {70, 13, 2, 2}, {70, 17, 2, 2}
+    };
+    for (int i = 0; i < 2; i++) {
+        SDL_RenderFillRect(game->renderer, &colon_rects[i]);
+    }
+    
+    // Render the actual number using our render_number function
+    render_number(game->renderer, game->platforms_landed, 80, 10, 3.0f);
     
     // Game over text (simple rectangle pattern)
     if (!game->game_running) {
@@ -325,7 +533,7 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
     
     // Handle input
     const bool *keyboard_state = SDL_GetKeyboardState(NULL);
-    handle_input(game, keyboard_state);
+    handle_input(game, keyboard_state, delta_time);
     
     // Update game
     update_game(game, delta_time);
