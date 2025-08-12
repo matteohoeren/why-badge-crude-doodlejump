@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <string.h>
 
 #define SDL_MAIN_USE_CALLBACKS 1
 #include <SDL3/SDL.h>
@@ -37,6 +38,10 @@
 #define PLAYER_SPEED           6.0f
 #define PLAYER_ACCELERATION    0.3f
 #define PLAYER_FRICTION        0.85f
+#define MAX_PROJECTILES        10
+#define PROJECTILE_SPEED       -7.0f
+#define PROJECTILE_WIDTH       8
+#define PROJECTILE_HEIGHT      16
 
 // Platform types
 typedef enum {
@@ -45,6 +50,13 @@ typedef enum {
     PLATFORM_BREAKABLE,
     PLATFORM_SPRING
 } PlatformType;
+
+// Projectile structure
+typedef struct {
+    float x, y;
+    float vy; // Only vertical velocity needed
+    bool active;
+} Projectile;
 
 // Platform structure
 typedef struct {
@@ -63,6 +75,8 @@ typedef struct {
     float width, height;
     bool on_ground;
     int facing_direction; // -1 for left, 1 for right
+    bool is_shooting; // Animation state for shooting
+    float shoot_timer; // Timer for shooting animation
 } Player;
 
 // Game state
@@ -72,6 +86,8 @@ typedef struct {
     Player player;
     Platform platforms[MAX_PLATFORMS];
     int num_platforms;
+    Projectile projectiles[MAX_PROJECTILES];
+    int num_projectiles;
     float camera_y; // Camera position for scrolling
     int score;
     int platforms_landed; // Count of platforms landed on
@@ -82,6 +98,8 @@ typedef struct {
     // Textures for graphics
     SDL_Texture *player_left_texture;
     SDL_Texture *player_right_texture;
+    SDL_Texture *player_shoot_texture;
+    SDL_Texture *projectile_texture;
     SDL_Texture *platform_normal_texture;
     SDL_Texture *platform_moving_texture;
     SDL_Texture *platform_breakable_texture;
@@ -103,6 +121,9 @@ void update_camera(GameState *game);
 bool check_platform_collision(Player *player, Platform *platform);
 void render_number(SDL_Renderer *renderer, int number, float x, float y, float scale);
 void render_text(SDL_Renderer *renderer, const char *text, float x, float y, float scale, int r, int g, int b, int a);
+void shoot_projectile(GameState *game);
+void update_projectiles(GameState *game, float delta_time);
+void render_projectiles(GameState *game);
 
 // Image loading functions
 SDL_Texture* load_texture_from_file(SDL_Renderer *renderer, const char *filename);
@@ -212,6 +233,8 @@ void load_game_textures(GameState *game) {
     // Initialize all textures to NULL
     game->player_left_texture = NULL;
     game->player_right_texture = NULL;
+    game->player_shoot_texture = NULL;
+    game->projectile_texture = NULL;
     game->platform_normal_texture = NULL;
     game->platform_moving_texture = NULL;
     game->platform_breakable_texture = NULL;
@@ -221,6 +244,8 @@ void load_game_textures(GameState *game) {
     // Try to load textures (if files don't exist, we'll fall back to rectangles)
     game->player_left_texture = load_texture_from_file(game->renderer, "assets/player_left.png");
     game->player_right_texture = load_texture_from_file(game->renderer, "assets/player_right.png");
+    game->player_shoot_texture = load_texture_from_file(game->renderer, "assets/player_shoot.png");
+    game->projectile_texture = load_texture_from_file(game->renderer, "assets/projectile.png");
     
     // Load platform textures from sprite sheet (adjusted positions and heights)
     // Standard platform: made taller to include bottom pixels
@@ -263,6 +288,14 @@ void init_game(GameState *game) {
     game->player.height = PLAYER_HEIGHT;
     game->player.on_ground = false;
     game->player.facing_direction = 1; // Start facing right
+    game->player.is_shooting = false;
+    game->player.shoot_timer = 0;
+    
+    // Initialize projectiles
+    game->num_projectiles = 0;
+    for (int i = 0; i < MAX_PROJECTILES; i++) {
+        game->projectiles[i].active = false;
+    }
     
     // Initialize camera
     game->camera_y = 0;
@@ -657,6 +690,86 @@ void update_camera(GameState *game) {
     }
 }
 
+// Shooting system functions
+void shoot_projectile(GameState *game) {
+    if (game->player.is_shooting || game->num_projectiles >= MAX_PROJECTILES) return;
+    
+    Player *player = &game->player;
+    
+    // Create new projectile
+    Projectile *projectile = &game->projectiles[game->num_projectiles];
+    projectile->x = player->x + player->width / 2 - PROJECTILE_WIDTH / 2;
+    projectile->y = player->y;
+    projectile->vy = PROJECTILE_SPEED; // Negative speed means upward
+    projectile->active = true;
+    
+    game->num_projectiles++;
+    
+    // Set player shooting state
+    player->is_shooting = true;
+    player->shoot_timer = 32.0f; // Show shooting animation for 0.8 seconds
+}
+
+void update_projectiles(GameState *game, float delta_time) {
+    // Update player shooting timer
+    Player *player = &game->player;
+    if (player->is_shooting) {
+        player->shoot_timer -= delta_time;
+        if (player->shoot_timer <= 0) {
+            player->is_shooting = false;
+        }
+    }
+    
+    // Update all projectiles
+    for (int i = 0; i < game->num_projectiles; i++) {
+        Projectile *projectile = &game->projectiles[i];
+        if (!projectile->active) continue;
+        
+        // Update position
+        projectile->y += projectile->vy * delta_time;
+        
+        // Deactivate projectiles that are off-screen (too far up)
+        if (projectile->y + PROJECTILE_HEIGHT < game->camera_y - 100) {
+            projectile->active = false;
+        }
+    }
+    
+    // Remove inactive projectiles by compacting the array
+    int write_index = 0;
+    for (int read_index = 0; read_index < game->num_projectiles; read_index++) {
+        if (game->projectiles[read_index].active) {
+            if (write_index != read_index) {
+                game->projectiles[write_index] = game->projectiles[read_index];
+            }
+            write_index++;
+        }
+    }
+    game->num_projectiles = write_index;
+}
+
+void render_projectiles(GameState *game) {
+    for (int i = 0; i < game->num_projectiles; i++) {
+        Projectile *projectile = &game->projectiles[i];
+        if (!projectile->active) continue;
+        
+        SDL_FRect dest_rect = {
+            projectile->x,
+            projectile->y - game->camera_y,
+            PROJECTILE_WIDTH,
+            PROJECTILE_HEIGHT
+        };
+        
+        if (game->projectile_texture) {
+            // Render projectile texture
+            SDL_RenderTexture(game->renderer, game->projectile_texture, NULL, &dest_rect);
+        } else {
+            // Fallback: render yellow rectangle
+            SDL_SetRenderDrawColor(game->renderer, 255, 255, 0, 255); // Yellow
+            SDL_RenderFillRect(game->renderer, &dest_rect);
+        }
+    }
+}
+
 // Update game logic
 void update_game(GameState *game, float delta_time) {
     if (!game->game_running) return;
@@ -748,6 +861,9 @@ void update_game(GameState *game, float delta_time) {
     // Update camera
     update_camera(game);
     
+    // Update projectiles
+    update_projectiles(game, delta_time);
+    
     // Update score based on height (platforms passed)
     int new_score = (int)(-game->camera_y / 10);
     if (new_score > game->score) {
@@ -822,9 +938,32 @@ void handle_input(GameState *game, const bool *keyboard_state, float delta_time)
         player->vx *= PLAYER_FRICTION;
     }
     
+    // Shooting input
+    if (keyboard_state[SDL_SCANCODE_RETURN] && game->game_running) {
+        shoot_projectile(game);
+    }
+    
     // Restart game
     if (keyboard_state[SDL_SCANCODE_R] && !game->game_running) {
         init_game(game);
+    }
+}
+
+void renderBackground(GameState *game){
+    if (game->background_texture) {
+        // Get background texture dimensions
+        float tex_width, tex_height;
+        SDL_GetTextureSize(game->background_texture, &tex_width, &tex_height);
+
+        // Calculate scale to fit width and maintain aspect ratio
+        float scale = (float)WINDOW_WIDTH / tex_width;
+        float scaled_height = tex_height * scale;
+
+        // Center the background vertically (allow height overflow)
+        float bg_y = (WINDOW_HEIGHT - scaled_height) / 2.0f;
+
+        SDL_FRect bg_rect = {0, bg_y, WINDOW_WIDTH, scaled_height};
+        SDL_RenderTexture(game->renderer, game->background_texture, NULL, &bg_rect);
     }
 }
 
@@ -835,22 +974,8 @@ void render_game(GameState *game) {
     SDL_RenderClear(game->renderer);
     
     // Render background if available
-    if (game->background_texture) {
-        // Get background texture dimensions
-        float tex_width, tex_height;
-        SDL_GetTextureSize(game->background_texture, &tex_width, &tex_height);
-        
-        // Calculate scale to fit width and maintain aspect ratio
-        float scale = (float)WINDOW_WIDTH / tex_width;
-        float scaled_height = tex_height * scale;
-        
-        // Center the background vertically (allow height overflow)
-        float bg_y = (WINDOW_HEIGHT - scaled_height) / 2.0f;
-        
-        SDL_FRect bg_rect = {0, bg_y, WINDOW_WIDTH, scaled_height};
-        SDL_RenderTexture(game->renderer, game->background_texture, NULL, &bg_rect);
-    }
-    
+    renderBackground(game);
+ 
     // Render platforms
     for (int i = 0; i < game->num_platforms; i++) {
         Platform *platform = &game->platforms[i];
@@ -897,6 +1022,9 @@ void render_game(GameState *game) {
         }
     }
     
+    // Render projectiles
+    render_projectiles(game);
+    
     // Render player
     SDL_FRect player_rect = {
         game->player.x,
@@ -905,9 +1033,12 @@ void render_game(GameState *game) {
         game->player.height
     };
     
-    // Choose the correct sprite based on facing direction
+    // Choose the correct sprite based on facing direction and shooting state
     SDL_Texture *player_texture = NULL;
-    if (game->player.facing_direction < 0) {
+    if (game->player.is_shooting && game->player_shoot_texture) {
+        // Use shooting texture when shooting
+        player_texture = game->player_shoot_texture;
+    } else if (game->player.facing_direction < 0) {
         player_texture = game->player_left_texture;
     } else {
         player_texture = game->player_right_texture;
@@ -918,89 +1049,57 @@ void render_game(GameState *game) {
         SDL_RenderTexture(game->renderer, player_texture, NULL, &player_rect);
     } else {
         // Fallback to colored rectangle
-        SDL_SetRenderDrawColor(game->renderer, 255, 100, 100, 255); // Light red
+        if (game->player.is_shooting) {
+            // Bright yellow when shooting
+            SDL_SetRenderDrawColor(game->renderer, 255, 255, 0, 255); // Bright yellow
+        } else {
+            // Normal light red
+            SDL_SetRenderDrawColor(game->renderer, 255, 100, 100, 255); // Light red
+        }
         SDL_RenderFillRect(game->renderer, &player_rect);
     }
     
-    // Render score - display platforms landed count at top of screen
-    SDL_SetRenderDrawColor(game->renderer, 0, 0, 0, 255); // Black color
-    
-    // Simple "SCORE:" text using rectangles
-    // S
-    SDL_FRect s_rects[] = {
-        {10, 10, 8, 2}, {10, 10, 2, 4}, {10, 14, 6, 2}, {16, 14, 2, 4}, {10, 18, 8, 2}
-    };
-    for (int i = 0; i < 5; i++) {
-        SDL_RenderFillRect(game->renderer, &s_rects[i]);
-    }
-    
-    // C
-    SDL_FRect c_rects[] = {
-        {22, 10, 8, 2}, {22, 10, 2, 10}, {22, 18, 8, 2}
-    };
-    for (int i = 0; i < 3; i++) {
-        SDL_RenderFillRect(game->renderer, &c_rects[i]);
-    }
-    
-    // O
-    SDL_FRect o_rects[] = {
-        {34, 10, 8, 2}, {34, 10, 2, 10}, {40, 10, 2, 10}, {34, 18, 8, 2}
-    };
-    for (int i = 0; i < 4; i++) {
-        SDL_RenderFillRect(game->renderer, &o_rects[i]);
-    }
-    
-    // R
-    SDL_FRect r_rects[] = {
-        {46, 10, 8, 2}, {46, 10, 2, 10}, {52, 10, 2, 4}, {46, 14, 6, 2}, {50, 14, 4, 6}
-    };
-    for (int i = 0; i < 5; i++) {
-        SDL_RenderFillRect(game->renderer, &r_rects[i]);
-    }
-    
-    // E
-    SDL_FRect e_rects[] = {
-        {58, 10, 8, 2}, {58, 10, 2, 10}, {58, 14, 6, 2}, {58, 18, 8, 2}
-    };
-    for (int i = 0; i < 4; i++) {
-        SDL_RenderFillRect(game->renderer, &e_rects[i]);
-    }
-    
-    // :
-    SDL_FRect colon_rects[] = {
-        {70, 13, 2, 2}, {70, 17, 2, 2}
-    };
-    for (int i = 0; i < 2; i++) {
-        SDL_RenderFillRect(game->renderer, &colon_rects[i]);
-    }
-    
-    // Render the actual score using our render_number function
-    render_number(game->renderer, game->score, 80, 10, 3.0f);
+    // Render the score using our new text rendering function
+    char score_text[32];
+    snprintf(score_text, sizeof(score_text), "SCORE %d", game->score);
+    render_text(game->renderer, score_text, 10, 10, 2.0f, 0, 0, 0, 255); // Black text
     
     // Game over screen with big banner
     if (!game->game_running) {
-        // Semi-transparent background overlay
-        SDL_SetRenderDrawColor(game->renderer, 0, 0, 0, 200);
-        SDL_FRect overlay = { 0, 0, WINDOW_WIDTH, WINDOW_HEIGHT };
-        SDL_RenderFillRect(game->renderer, &overlay);
+
+        
+        renderBackground(game);
+
         
         // Large "GAME OVER" banner using our new text rendering function
-        float text_scale = 3.0f; // Make it nice and big
+        float text_scale = 6.5f; // Make it much bigger
         float text_x = WINDOW_WIDTH / 2 - (strlen("GAME OVER") * 6 * text_scale) / 2; // Center text
-        float text_y = WINDOW_HEIGHT / 2 - (7 * text_scale) / 2; // Center vertically
+        float text_y = (WINDOW_HEIGHT / 2 - (7 * text_scale) / 2) - 60; // Center vertically
         
+        // Create bold effect by rendering multiple times with slight offsets
+        // Shadow effect (darker red)
+        render_text(game->renderer, "GAME OVER", text_x + 2, text_y + 2, text_scale, 128, 0, 0, 255);
+        // Main text (bright red)
         render_text(game->renderer, "GAME OVER", text_x, text_y, text_scale, 255, 0, 0, 255);
+        // Bold effect (render again slightly offset)
+        render_text(game->renderer, "GAME OVER", text_x + 1, text_y, text_scale, 255, 0, 0, 255);
+        render_text(game->renderer, "GAME OVER", text_x, text_y + 1, text_scale, 255, 0, 0, 255);
         
         // Score display below banner
-        SDL_SetRenderDrawColor(game->renderer, 0, 0, 0, 255); // Black color
-        render_number(game->renderer, game->score, WINDOW_WIDTH / 2 - 30, WINDOW_HEIGHT / 2 + 60, 5.0f);
+        char score_text[32];
+        snprintf(score_text, sizeof(score_text), "SCORE %d", game->score);
+        float score_text_scale = 2.0f;
+        float score_text_x = WINDOW_WIDTH / 2 - (strlen(score_text) * 6 * score_text_scale) / 2;
+        float score_text_y = WINDOW_HEIGHT / 2 + 40;
+        
+        render_text(game->renderer, score_text, score_text_x, score_text_y, score_text_scale, 0, 0, 0, 0); // Black text
         
         // Restart hint - "PRESS R" 
         float hint_text_scale = 1.5f;
         float hint_text_x = WINDOW_WIDTH / 2 - (strlen("PRESS R") * 6 * hint_text_scale) / 2;
         float hint_text_y = WINDOW_HEIGHT / 2 + 100;
         
-        render_text(game->renderer, "PRESS R", hint_text_x, hint_text_y, hint_text_scale, 255, 255, 0, 255);
+        render_text(game->renderer, "PRESS R", hint_text_x, hint_text_y, hint_text_scale, 255, 165, 0, 255);
     }
     
     SDL_RenderPresent(game->renderer);
