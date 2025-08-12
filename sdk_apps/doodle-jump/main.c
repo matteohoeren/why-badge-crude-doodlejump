@@ -12,6 +12,10 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
+// Image loading support
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
+
 // Include BadgeVMS device support for BMI270 (only when building for badge hardware)
 #ifdef BADGEVMS_BUILD
 #include "badgevms/device.h"
@@ -20,8 +24,8 @@
 // Game constants
 #define WINDOW_WIDTH           576
 #define WINDOW_HEIGHT          432
-#define PLAYER_WIDTH           20
-#define PLAYER_HEIGHT          20
+#define PLAYER_WIDTH           40
+#define PLAYER_HEIGHT          40
 #define PLATFORM_WIDTH         80
 #define PLATFORM_HEIGHT        15
 #define MAX_PLATFORMS          100
@@ -58,6 +62,7 @@ typedef struct {
     float vx, vy; // velocity
     float width, height;
     bool on_ground;
+    int facing_direction; // -1 for left, 1 for right
 } Player;
 
 // Game state
@@ -73,6 +78,16 @@ typedef struct {
     int last_platform_landed; // Index of last platform landed on to avoid double counting
     bool game_running;
     Uint64 last_time;
+    
+    // Textures for graphics
+    SDL_Texture *player_left_texture;
+    SDL_Texture *player_right_texture;
+    SDL_Texture *platform_normal_texture;
+    SDL_Texture *platform_moving_texture;
+    SDL_Texture *platform_breakable_texture;
+    SDL_Texture *platform_spring_texture;
+    SDL_Texture *background_texture;
+    
 #ifdef BADGEVMS_BUILD
     orientation_device_t *orientation; // BMI270 orientation sensor
 #endif
@@ -80,14 +95,158 @@ typedef struct {
 
 // Function declarations
 void init_game(GameState *game);
-void generate_platforms(GameState *game);
-void generate_new_platforms(GameState *game);
+void generate_platforms(GameState *game, bool is_initial_generation);
 void update_game(GameState *game, float delta_time);
 void render_game(GameState *game);
 void handle_input(GameState *game, const bool *keyboard_state, float delta_time);
 void update_camera(GameState *game);
 bool check_platform_collision(Player *player, Platform *platform);
 void render_number(SDL_Renderer *renderer, int number, float x, float y, float scale);
+
+// Image loading functions
+SDL_Texture* load_texture_from_file(SDL_Renderer *renderer, const char *filename);
+SDL_Texture* load_tile_from_sprite_sheet(SDL_Renderer *renderer, const char *filename, int tile_x, int tile_y, int tile_width, int tile_height);
+void load_game_textures(GameState *game);
+void cleanup_textures(GameState *game);
+
+// Load texture from image file using stb_image
+SDL_Texture* load_texture_from_file(SDL_Renderer *renderer, const char *filename) {
+    int width, height, channels;
+    unsigned char *image_data = stbi_load(filename, &width, &height, &channels, 4); // Force 4 channels (RGBA)
+    
+    if (!image_data) {
+        printf("Failed to load image %s: %s\n", filename, stbi_failure_reason());
+        return NULL;
+    }
+    
+    // Create SDL surface from image data
+    SDL_Surface *surface = SDL_CreateSurfaceFrom(width, height, SDL_PIXELFORMAT_RGBA32, image_data, width * 4);
+    if (!surface) {
+        printf("Failed to create surface from image %s: %s\n", filename, SDL_GetError());
+        stbi_image_free(image_data);
+        return NULL;
+    }
+    
+    // Create texture from surface
+    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
+    if (!texture) {
+        printf("Failed to create texture from image %s: %s\n", filename, SDL_GetError());
+    }
+    
+    // Cleanup
+    SDL_DestroySurface(surface);
+    stbi_image_free(image_data);
+    
+    return texture;
+}
+
+// Load a specific tile from a sprite sheet
+SDL_Texture* load_tile_from_sprite_sheet(SDL_Renderer *renderer, const char *filename, int tile_x, int tile_y, int tile_width, int tile_height) {
+    int width, height, channels;
+    unsigned char *image_data = stbi_load(filename, &width, &height, &channels, 4); // Force 4 channels (RGBA)
+    
+    if (!image_data) {
+        printf("Failed to load sprite sheet %s: %s\n", filename, stbi_failure_reason());
+        return NULL;
+    }
+    
+    // Create a smaller image buffer for the tile
+    unsigned char *tile_data = (unsigned char*)malloc(tile_width * tile_height * 4);
+    if (!tile_data) {
+        printf("Failed to allocate memory for tile\n");
+        stbi_image_free(image_data);
+        return NULL;
+    }
+    
+    // Extract the tile from the sprite sheet
+    for (int y = 0; y < tile_height; y++) {
+        for (int x = 0; x < tile_width; x++) {
+            int src_x = tile_x + x;
+            int src_y = tile_y + y;
+            
+            // Make sure we don't go out of bounds
+            if (src_x >= width || src_y >= height) {
+                // Fill with transparent pixels if out of bounds
+                tile_data[(y * tile_width + x) * 4 + 0] = 0;     // R
+                tile_data[(y * tile_width + x) * 4 + 1] = 0;     // G
+                tile_data[(y * tile_width + x) * 4 + 2] = 0;     // B
+                tile_data[(y * tile_width + x) * 4 + 3] = 0;     // A
+            } else {
+                // Copy pixel from source
+                int src_index = (src_y * width + src_x) * 4;
+                int dst_index = (y * tile_width + x) * 4;
+                tile_data[dst_index + 0] = image_data[src_index + 0]; // R
+                tile_data[dst_index + 1] = image_data[src_index + 1]; // G
+                tile_data[dst_index + 2] = image_data[src_index + 2]; // B
+                tile_data[dst_index + 3] = image_data[src_index + 3]; // A
+            }
+        }
+    }
+    
+    // Create SDL surface from tile data
+    SDL_Surface *surface = SDL_CreateSurfaceFrom(tile_width, tile_height, SDL_PIXELFORMAT_RGBA32, tile_data, tile_width * 4);
+    if (!surface) {
+        printf("Failed to create surface from tile: %s\n", SDL_GetError());
+        free(tile_data);
+        stbi_image_free(image_data);
+        return NULL;
+    }
+    
+    // Create texture from surface
+    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
+    if (!texture) {
+        printf("Failed to create texture from tile: %s\n", SDL_GetError());
+    }
+    
+    // Cleanup
+    SDL_DestroySurface(surface);
+    free(tile_data);
+    stbi_image_free(image_data);
+    
+    return texture;
+}
+
+// Load all game textures
+void load_game_textures(GameState *game) {
+    // Initialize all textures to NULL
+    game->player_left_texture = NULL;
+    game->player_right_texture = NULL;
+    game->platform_normal_texture = NULL;
+    game->platform_moving_texture = NULL;
+    game->platform_breakable_texture = NULL;
+    game->platform_spring_texture = NULL;
+    game->background_texture = NULL;
+    
+    // Try to load textures (if files don't exist, we'll fall back to rectangles)
+    game->player_left_texture = load_texture_from_file(game->renderer, "assets/player_left.png");
+    game->player_right_texture = load_texture_from_file(game->renderer, "assets/player_right.png");
+    
+    // Load platform textures from sprite sheet (trying different positions)
+    // Assuming 80x15 pixel platforms in the sprite sheet
+    game->platform_normal_texture = load_tile_from_sprite_sheet(game->renderer, "assets/game_tiles.png", 0, 0, 80, 15);
+    game->platform_moving_texture = load_tile_from_sprite_sheet(game->renderer, "assets/game_tiles.png", 0, 20, 80, 15);
+    game->platform_breakable_texture = load_tile_from_sprite_sheet(game->renderer, "assets/game_tiles.png", 0, 40, 80, 15);
+    game->platform_spring_texture = load_tile_from_sprite_sheet(game->renderer, "assets/game_tiles.png", 0, 60, 80, 15);
+    
+    game->background_texture = load_texture_from_file(game->renderer, "assets/background.png");
+    
+    printf("Loaded textures: left=%p, right=%p, normal=%p, moving=%p, breakable=%p, spring=%p, bg=%p\n",
+           (void*)game->player_left_texture, (void*)game->player_right_texture, 
+           (void*)game->platform_normal_texture, (void*)game->platform_moving_texture,
+           (void*)game->platform_breakable_texture, (void*)game->platform_spring_texture,
+           (void*)game->background_texture);
+}
+
+// Cleanup all textures
+void cleanup_textures(GameState *game) {
+    if (game->player_left_texture) SDL_DestroyTexture(game->player_left_texture);
+    if (game->player_right_texture) SDL_DestroyTexture(game->player_right_texture);
+    if (game->platform_normal_texture) SDL_DestroyTexture(game->platform_normal_texture);
+    if (game->platform_moving_texture) SDL_DestroyTexture(game->platform_moving_texture);
+    if (game->platform_breakable_texture) SDL_DestroyTexture(game->platform_breakable_texture);
+    if (game->platform_spring_texture) SDL_DestroyTexture(game->platform_spring_texture);
+    if (game->background_texture) SDL_DestroyTexture(game->background_texture);
+}
 
 // Initialize the game state
 void init_game(GameState *game) {
@@ -99,6 +258,7 @@ void init_game(GameState *game) {
     game->player.width = PLAYER_WIDTH;
     game->player.height = PLAYER_HEIGHT;
     game->player.on_ground = false;
+    game->player.facing_direction = 1; // Start facing right
     
     // Initialize camera
     game->camera_y = 0;
@@ -115,112 +275,43 @@ void init_game(GameState *game) {
     }
 #endif
     
+    // Load game textures
+    load_game_textures(game);
+    
     // Generate initial platforms
-    generate_platforms(game);
+    generate_platforms(game, true);
 }
 
-// Generate platforms for the game
-void generate_platforms(GameState *game) {
-    game->num_platforms = 0;
-    
-    // Add a starting platform at the bottom - always clearly visible with good padding
-    Platform *start_platform = &game->platforms[game->num_platforms++];
-    start_platform->x = WINDOW_WIDTH / 2 - PLATFORM_WIDTH / 2;
-    start_platform->y = WINDOW_HEIGHT - PLATFORM_HEIGHT - 50; // 50px offset from bottom for better visibility
-    start_platform->width = PLATFORM_WIDTH;
-    start_platform->height = PLATFORM_HEIGHT;
-    start_platform->type = PLATFORM_NORMAL;
-    start_platform->active = true;
-    start_platform->move_direction = 0;
-    start_platform->move_speed = 0;
-    
-    // Generate platforms going upward
-    float current_y = start_platform->y - PLATFORM_SPACING_MIN;
-    
-    for (int i = 1; i < MAX_PLATFORMS && current_y > -1000; i++) {
-        Platform *platform = &game->platforms[game->num_platforms++];
+// Generate platforms for the game (unified function for initial and ongoing generation)
+void generate_platforms(GameState *game, bool is_initial_generation) {
+    if (is_initial_generation) {
+        // Reset platform count for initial generation
+        game->num_platforms = 0;
         
-        // Random horizontal position
-        platform->x = (float)(SDL_rand(WINDOW_WIDTH - (int)PLATFORM_WIDTH));
-        platform->y = current_y;
-        platform->width = PLATFORM_WIDTH;
-        platform->height = PLATFORM_HEIGHT;
+        // Add a starting platform at the bottom - always clearly visible with good padding
+        Platform *start_platform = &game->platforms[game->num_platforms++];
+        start_platform->x = WINDOW_WIDTH / 2 - PLATFORM_WIDTH / 2;
+        start_platform->y = WINDOW_HEIGHT - PLATFORM_HEIGHT - 50; // 50px offset from bottom for better visibility
+        start_platform->width = PLATFORM_WIDTH;
+        start_platform->height = PLATFORM_HEIGHT;
+        start_platform->type = PLATFORM_NORMAL;
+        start_platform->active = true;
+        start_platform->move_direction = 0;
+        start_platform->move_speed = 0;
         
-        // Randomly assign platform types (85% normal, 5% moving, 5% breakable, 5% spring)
-        int rand_type = SDL_rand(100);
-        if (rand_type < 85) {
-            platform->type = PLATFORM_NORMAL;
-            platform->move_direction = 0;
-            platform->move_speed = 0;
-        } else if (rand_type < 90) {
-            platform->type = PLATFORM_MOVING;
-            platform->move_direction = (SDL_rand(2) == 0) ? 1.0f : -1.0f; // Random direction
-            // Random speed between 0.5x and 1.25x (reduced by factor of 4)
-            platform->move_speed = 0.5f + (float)(SDL_rand(15)) / 20.0f; // 0.5f to 1.25f
-        } else if (rand_type < 95) {
-            platform->type = PLATFORM_BREAKABLE;
-            platform->move_direction = 0;
-            platform->move_speed = 0;
-        } else {
-            platform->type = PLATFORM_SPRING;
-            platform->move_direction = 0;
-            platform->move_speed = 0;
-        }
+        // Generate initial platforms going upward
+        float current_y = start_platform->y - PLATFORM_SPACING_MIN;
         
-        platform->active = true;
-        
-        // Move to next platform position with difficulty scaling
-        // As we go higher (more negative Y), increase spacing between platforms
-        float height_factor = (-current_y) / 500.0f; // Difficulty increases every 500 units
-        int additional_spacing = (int)(height_factor * 15); // Reduced from 20 to 15 for easier jumps
-        
-        // Clamp the additional spacing to prevent impossible gaps
-        if (additional_spacing > 30) additional_spacing = 30; // Reduced from 40 to 30
-        
-        current_y -= PLATFORM_SPACING_MIN + (SDL_rand(PLATFORM_SPACING_MAX - PLATFORM_SPACING_MIN)) + additional_spacing;
-    }
-}
-
-// Generate new platforms as the player moves upward (infinite generation)
-void generate_new_platforms(GameState *game) {
-    // Find the highest platform
-    float highest_y = game->camera_y; // Start with camera position
-    for (int i = 0; i < game->num_platforms; i++) {
-        if (game->platforms[i].active && game->platforms[i].y < highest_y) {
-            highest_y = game->platforms[i].y;
-        }
-    }
-    
-    // Generate new platforms if we need more above the highest point
-    float target_height = game->camera_y - WINDOW_HEIGHT - 200; // Generate well above camera
-    float current_y = highest_y - PLATFORM_SPACING_MIN;
-    
-    while (current_y > target_height && game->num_platforms < MAX_PLATFORMS) {
-        // Find an inactive platform slot to reuse
-        int slot = -1;
-        for (int i = 0; i < game->num_platforms; i++) {
-            if (!game->platforms[i].active) {
-                slot = i;
-                break;
-            }
-        }
-        
-        // If no inactive slot, try to add a new one
-        if (slot == -1 && game->num_platforms < MAX_PLATFORMS) {
-            slot = game->num_platforms++;
-        }
-        
-        // If we found a slot, create a new platform
-        if (slot != -1) {
-            Platform *platform = &game->platforms[slot];
+        for (int i = 1; i < MAX_PLATFORMS && current_y > -1000; i++) {
+            Platform *platform = &game->platforms[game->num_platforms++];
             
-            // Random horizontal position
             platform->x = (float)(SDL_rand(WINDOW_WIDTH - (int)PLATFORM_WIDTH));
             platform->y = current_y;
             platform->width = PLATFORM_WIDTH;
             platform->height = PLATFORM_HEIGHT;
+            platform->active = true;
             
-            // Randomly assign platform types (85% normal, 5% moving, 5% breakable, 5% spring)
+            // Set platform type and properties using helper logic
             int rand_type = SDL_rand(100);
             if (rand_type < 85) {
                 platform->type = PLATFORM_NORMAL;
@@ -228,11 +319,10 @@ void generate_new_platforms(GameState *game) {
                 platform->move_speed = 0;
             } else if (rand_type < 90) {
                 platform->type = PLATFORM_MOVING;
-                platform->move_direction = (SDL_rand(2) == 0) ? 1.0f : -1.0f; // Random direction
-                // Random speed between 0.5x and 1.25x, factoring in score (reduced by factor of 4)
-                float base_speed = 0.5f + (float)(SDL_rand(15)) / 20.0f; // 0.5f to 1.25f
-                float score_multiplier = 1.0f + (float)game->score / 200.0f; // Gradual increase
-                platform->move_speed = base_speed * score_multiplier;
+                platform->move_direction = (SDL_rand(2) == 0) ? 1.0f : -1.0f;
+                platform->move_speed = game->score / 800.0f + (float)(SDL_rand(4)) / 20.0f;
+                if (platform->move_speed < 0.5f) platform->move_speed = 0.5f;
+                else if (platform->move_speed > 1.0f) platform->move_speed = 1.0f;
             } else if (rand_type < 95) {
                 platform->type = PLATFORM_BREAKABLE;
                 platform->move_direction = 0;
@@ -243,20 +333,83 @@ void generate_new_platforms(GameState *game) {
                 platform->move_speed = 0;
             }
             
-            platform->active = true;
-            
-            // Move to next platform position with difficulty scaling
-            // As we go higher (more negative Y), increase spacing between platforms
-            float height_factor = (-current_y) / 500.0f; // Difficulty increases every 500 units
-            int additional_spacing = (int)(height_factor * 15); // Reduced from 20 to 15 for easier jumps
-            
-            // Clamp the additional spacing to prevent impossible gaps
-            if (additional_spacing > 30) additional_spacing = 30; // Reduced from 40 to 30
+            // Calculate next platform position with difficulty scaling
+            float height_factor = (-current_y) / 500.0f;
+            int additional_spacing = (int)(height_factor * 15);
+            if (additional_spacing > 30) additional_spacing = 30;
             
             current_y -= PLATFORM_SPACING_MIN + (SDL_rand(PLATFORM_SPACING_MAX - PLATFORM_SPACING_MIN)) + additional_spacing;
-        } else {
-            // No more slots available, break out
-            break;
+        }
+    } else {
+        // Continuous generation during gameplay
+        // Find the highest platform
+        float highest_y = game->camera_y;
+        for (int i = 0; i < game->num_platforms; i++) {
+            if (game->platforms[i].active && game->platforms[i].y < highest_y) {
+                highest_y = game->platforms[i].y;
+            }
+        }
+        
+        // Generate new platforms if we need more above the highest point
+        float target_height = game->camera_y - WINDOW_HEIGHT - 200;
+        float current_y = highest_y - PLATFORM_SPACING_MIN;
+        
+        while (current_y > target_height && game->num_platforms < MAX_PLATFORMS) {
+            // Find an inactive platform slot to reuse
+            int slot = -1;
+            for (int i = 0; i < game->num_platforms; i++) {
+                if (!game->platforms[i].active) {
+                    slot = i;
+                    break;
+                }
+            }
+            
+            // If no inactive slot, try to add a new one
+            if (slot == -1 && game->num_platforms < MAX_PLATFORMS) {
+                slot = game->num_platforms++;
+            }
+            
+            // If we found a slot, create a new platform
+            if (slot != -1) {
+                Platform *platform = &game->platforms[slot];
+                
+                platform->x = (float)(SDL_rand(WINDOW_WIDTH - (int)PLATFORM_WIDTH));
+                platform->y = current_y;
+                platform->width = PLATFORM_WIDTH;
+                platform->height = PLATFORM_HEIGHT;
+                platform->active = true;
+                
+                // Set platform type and properties using helper logic
+                int rand_type = SDL_rand(100);
+                if (rand_type < 85) {
+                    platform->type = PLATFORM_NORMAL;
+                    platform->move_direction = 0;
+                    platform->move_speed = 0;
+                } else if (rand_type < 90) {
+                    platform->type = PLATFORM_MOVING;
+                    platform->move_direction = (SDL_rand(2) == 0) ? 1.0f : -1.0f;
+                    platform->move_speed = game->score / 800.0f + (float)(SDL_rand(4)) / 20.0f;
+                    if (platform->move_speed < 0.5f) platform->move_speed = 0.5f;
+                    else if (platform->move_speed > 1.0f) platform->move_speed = 1.0f;
+                } else if (rand_type < 95) {
+                    platform->type = PLATFORM_BREAKABLE;
+                    platform->move_direction = 0;
+                    platform->move_speed = 0;
+                } else {
+                    platform->type = PLATFORM_SPRING;
+                    platform->move_direction = 0;
+                    platform->move_speed = 0;
+                }
+                
+                // Calculate next platform position with difficulty scaling
+                float height_factor = (-current_y) / 500.0f;
+                int additional_spacing = (int)(height_factor * 15);
+                if (additional_spacing > 30) additional_spacing = 30;
+                
+                current_y -= PLATFORM_SPACING_MIN + (SDL_rand(PLATFORM_SPACING_MAX - PLATFORM_SPACING_MIN)) + additional_spacing;
+            } else {
+                break;
+            }
         }
     }
 }
@@ -425,7 +578,7 @@ void update_game(GameState *game, float delta_time) {
     }
     
     // Generate new platforms as needed for infinite gameplay
-    generate_new_platforms(game);
+    generate_platforms(game, false);
     
     // Check platform collisions
     player->on_ground = false;
@@ -485,9 +638,11 @@ void handle_input(GameState *game, const bool *keyboard_state, float delta_time)
     // Keyboard controls (Left/Right movement)
     if (keyboard_state[SDL_SCANCODE_LEFT] || keyboard_state[SDL_SCANCODE_A]) {
         target_vx = -PLAYER_SPEED;
+        player->facing_direction = -1; // Face left
     }
     if (keyboard_state[SDL_SCANCODE_RIGHT] || keyboard_state[SDL_SCANCODE_D]) {
         target_vx = PLAYER_SPEED;
+        player->facing_direction = 1; // Face right
     }
     
 #ifdef BADGEVMS_BUILD
@@ -503,6 +658,7 @@ void handle_input(GameState *game, const bool *keyboard_state, float delta_time)
             if (degrees <= 45) {
                 float tilt_factor = (float)degrees / 45.0f; // 0.0 to 1.0
                 target_vx = PLAYER_SPEED * tilt_factor;
+                if (tilt_factor > 0.1f) player->facing_direction = 1; // Face right
             }
             // Left tilt (135° to 180°, then 180° to 225° mapped to negative)
             else if (degrees >= 135) {
@@ -513,12 +669,14 @@ void handle_input(GameState *game, const bool *keyboard_state, float delta_time)
                     tilt_factor = ((float)degrees - 180.0f) / 45.0f; // 0.0 to 1.0
                 }
                 target_vx = -PLAYER_SPEED * tilt_factor;
+                if (tilt_factor > 0.1f) player->facing_direction = -1; // Face left
             }
         } else if (degrees > 180) {
             // Handle 315° to 360° range (left tilt)
             if (degrees >= 315) {
                 float tilt_factor = (360.0f - (float)degrees) / 45.0f; // 1.0 to 0.0
                 target_vx = -PLAYER_SPEED * tilt_factor;
+                if (tilt_factor > 0.1f) player->facing_direction = -1; // Face left
             }
         }
     }
@@ -540,30 +698,20 @@ void handle_input(GameState *game, const bool *keyboard_state, float delta_time)
 
 // Render the game
 void render_game(GameState *game) {
-    // Clear screen with sky blue color
-    SDL_SetRenderDrawColor(game->renderer, 135, 206, 235, 255);
+    // Clear screen
+    SDL_SetRenderDrawColor(game->renderer, 135, 206, 235, 255); // Sky blue fallback
     SDL_RenderClear(game->renderer);
+    
+    // Render background if available
+    if (game->background_texture) {
+        SDL_FRect bg_rect = {0, 0, WINDOW_WIDTH, WINDOW_HEIGHT};
+        SDL_RenderTexture(game->renderer, game->background_texture, NULL, &bg_rect);
+    }
     
     // Render platforms
     for (int i = 0; i < game->num_platforms; i++) {
         Platform *platform = &game->platforms[i];
         if (!platform->active) continue;
-        
-        // Set color based on platform type
-        switch (platform->type) {
-            case PLATFORM_NORMAL:
-                SDL_SetRenderDrawColor(game->renderer, 34, 139, 34, 255); // Forest green
-                break;
-            case PLATFORM_MOVING:
-                SDL_SetRenderDrawColor(game->renderer, 255, 165, 0, 255); // Orange
-                break;
-            case PLATFORM_BREAKABLE:
-                SDL_SetRenderDrawColor(game->renderer, 139, 69, 19, 255); // Brown
-                break;
-            case PLATFORM_SPRING:
-                SDL_SetRenderDrawColor(game->renderer, 255, 20, 147, 255); // Deep pink
-                break;
-        }
         
         // Convert world coordinates to screen coordinates
         SDL_FRect rect = {
@@ -575,19 +723,61 @@ void render_game(GameState *game) {
         
         // Only render if platform is visible on screen
         if (rect.y > -platform->height && rect.y < WINDOW_HEIGHT + platform->height) {
-            SDL_RenderFillRect(game->renderer, &rect);
+            // Try to use texture first, fall back to colored rectangle
+            SDL_Texture *texture = NULL;
+            switch (platform->type) {
+                case PLATFORM_NORMAL:
+                    texture = game->platform_normal_texture;
+                    SDL_SetRenderDrawColor(game->renderer, 34, 139, 34, 255); // Forest green fallback
+                    break;
+                case PLATFORM_MOVING:
+                    texture = game->platform_moving_texture;
+                    SDL_SetRenderDrawColor(game->renderer, 255, 165, 0, 255); // Orange fallback
+                    break;
+                case PLATFORM_BREAKABLE:
+                    texture = game->platform_breakable_texture;
+                    SDL_SetRenderDrawColor(game->renderer, 139, 69, 19, 255); // Brown fallback
+                    break;
+                case PLATFORM_SPRING:
+                    texture = game->platform_spring_texture;
+                    SDL_SetRenderDrawColor(game->renderer, 255, 20, 147, 255); // Deep pink fallback
+                    break;
+            }
+            
+            if (texture) {
+                // Render using texture
+                SDL_RenderTexture(game->renderer, texture, NULL, &rect);
+            } else {
+                // Fallback to colored rectangle
+                SDL_RenderFillRect(game->renderer, &rect);
+            }
         }
     }
     
     // Render player
-    SDL_SetRenderDrawColor(game->renderer, 255, 100, 100, 255); // Light red
     SDL_FRect player_rect = {
         game->player.x,
         game->player.y - game->camera_y,
         game->player.width,
         game->player.height
     };
-    SDL_RenderFillRect(game->renderer, &player_rect);
+    
+    // Choose the correct sprite based on facing direction
+    SDL_Texture *player_texture = NULL;
+    if (game->player.facing_direction < 0) {
+        player_texture = game->player_left_texture;
+    } else {
+        player_texture = game->player_right_texture;
+    }
+    
+    if (player_texture) {
+        // Render using directional texture
+        SDL_RenderTexture(game->renderer, player_texture, NULL, &player_rect);
+    } else {
+        // Fallback to colored rectangle
+        SDL_SetRenderDrawColor(game->renderer, 255, 100, 100, 255); // Light red
+        SDL_RenderFillRect(game->renderer, &player_rect);
+    }
     
     // Render score - display platforms landed count at top of screen
     SDL_SetRenderDrawColor(game->renderer, 255, 255, 255, 255);
@@ -855,6 +1045,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
 void SDL_AppQuit(void *appstate, SDL_AppResult result) {
     if (appstate != NULL) {
         GameState *game = (GameState *)appstate;
+        cleanup_textures(game);
         SDL_DestroyRenderer(game->renderer);
         SDL_DestroyWindow(game->window);
         SDL_free(game);
