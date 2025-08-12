@@ -43,6 +43,15 @@
 #define PROJECTILE_WIDTH       8
 #define PROJECTILE_HEIGHT      16
 
+// Monster constants
+#define MAX_MONSTERS           20
+#define MONSTER_WIDTH          70
+#define MONSTER_HEIGHT         90
+#define MONSTER_SPAWN_SCORE_MIN 100
+#define MONSTER_SPAWN_SCORE_MAX 1500
+#define MONSTER_MAX_SCORE      5000
+#define MONSTER_SPEED          0.03f
+
 // Platform types
 typedef enum {
     PLATFORM_NORMAL = 0,
@@ -57,6 +66,21 @@ typedef struct {
     float vy; // Only vertical velocity needed
     bool active;
 } Projectile;
+
+// Monster types
+typedef enum {
+    MONSTER_BASIC = 0
+} MonsterType;
+
+// Monster structure
+typedef struct {
+    float x, y;
+    float vx; // Horizontal velocity
+    float width, height;
+    MonsterType type;
+    bool active;
+    float move_direction; // -1 for left, 1 for right
+} Monster;
 
 // Platform structure
 typedef struct {
@@ -88,6 +112,8 @@ typedef struct {
     int num_platforms;
     Projectile projectiles[MAX_PROJECTILES];
     int num_projectiles;
+    Monster monsters[MAX_MONSTERS];
+    int num_monsters;
     float camera_y; // Camera position for scrolling
     int score;
     int platforms_landed; // Count of platforms landed on
@@ -100,6 +126,7 @@ typedef struct {
     SDL_Texture *player_right_texture;
     SDL_Texture *player_shoot_texture;
     SDL_Texture *projectile_texture;
+    SDL_Texture *monster_basic_texture;
     SDL_Texture *platform_normal_texture;
     SDL_Texture *platform_moving_texture;
     SDL_Texture *platform_breakable_texture;
@@ -124,6 +151,12 @@ void render_text(SDL_Renderer *renderer, const char *text, float x, float y, flo
 void shoot_projectile(GameState *game);
 void update_projectiles(GameState *game, float delta_time);
 void render_projectiles(GameState *game);
+void spawn_monster(GameState *game, float x, float y);
+void update_monsters(GameState *game, float delta_time);
+void render_monsters(GameState *game);
+bool check_monster_collision(Player *player, Monster *monster);
+bool check_projectile_monster_collision(Projectile *projectile, Monster *monster);
+bool is_monster_nearby(GameState *game, float x, float y, float min_distance);
 
 // Image loading functions
 SDL_Texture* load_texture_from_file(SDL_Renderer *renderer, const char *filename);
@@ -235,6 +268,7 @@ void load_game_textures(GameState *game) {
     game->player_right_texture = NULL;
     game->player_shoot_texture = NULL;
     game->projectile_texture = NULL;
+    game->monster_basic_texture = NULL;
     game->platform_normal_texture = NULL;
     game->platform_moving_texture = NULL;
     game->platform_breakable_texture = NULL;
@@ -257,19 +291,25 @@ void load_game_textures(GameState *game) {
     // Spring platform: try different position
     game->platform_spring_texture = load_tile_from_sprite_sheet(game->renderer, "assets/game_tiles.png", 0, 35, 65, 18);
 
+    // Load monster textures from sprite sheet (to the right of platforms)
+    game->monster_basic_texture = load_tile_from_sprite_sheet(game->renderer, "assets/game_tiles.png", 65, 0, 70, 90);
+
     game->background_texture = load_texture_from_file(game->renderer, "assets/background.png");
     
-    printf("Loaded textures: left=%p, right=%p, normal=%p, moving=%p, breakable=%p, spring=%p, bg=%p\n",
+    printf("Loaded textures: left=%p, right=%p, normal=%p, moving=%p, breakable=%p, spring=%p, monster=%p, bg=%p\n",
            (void*)game->player_left_texture, (void*)game->player_right_texture, 
            (void*)game->platform_normal_texture, (void*)game->platform_moving_texture,
            (void*)game->platform_breakable_texture, (void*)game->platform_spring_texture,
-           (void*)game->background_texture);
+           (void*)game->monster_basic_texture, (void*)game->background_texture);
 }
 
 // Cleanup all textures
 void cleanup_textures(GameState *game) {
     if (game->player_left_texture) SDL_DestroyTexture(game->player_left_texture);
     if (game->player_right_texture) SDL_DestroyTexture(game->player_right_texture);
+    if (game->player_shoot_texture) SDL_DestroyTexture(game->player_shoot_texture);
+    if (game->projectile_texture) SDL_DestroyTexture(game->projectile_texture);
+    if (game->monster_basic_texture) SDL_DestroyTexture(game->monster_basic_texture);
     if (game->platform_normal_texture) SDL_DestroyTexture(game->platform_normal_texture);
     if (game->platform_moving_texture) SDL_DestroyTexture(game->platform_moving_texture);
     if (game->platform_breakable_texture) SDL_DestroyTexture(game->platform_breakable_texture);
@@ -279,14 +319,13 @@ void cleanup_textures(GameState *game) {
 
 // Initialize the game state
 void init_game(GameState *game) {
-    // Initialize player - position above starting platform
+    // Initialize basic player properties first
     game->player.x = WINDOW_WIDTH / 2 - PLAYER_WIDTH / 2;
-    game->player.y = WINDOW_HEIGHT - PLATFORM_HEIGHT - 50 - PLAYER_HEIGHT - 5; // Above starting platform
     game->player.vx = 0;
     game->player.vy = 0;
     game->player.width = PLAYER_WIDTH;
     game->player.height = PLAYER_HEIGHT;
-    game->player.on_ground = false;
+    game->player.on_ground = true; // Start on ground
     game->player.facing_direction = 1; // Start facing right
     game->player.is_shooting = false;
     game->player.shoot_timer = 0;
@@ -297,8 +336,13 @@ void init_game(GameState *game) {
         game->projectiles[i].active = false;
     }
     
-    // Initialize camera
-    game->camera_y = 0;
+    // Initialize monsters
+    game->num_monsters = 0;
+    for (int i = 0; i < MAX_MONSTERS; i++) {
+        game->monsters[i].active = false;
+    }
+    
+    // Initialize game state
     game->score = 0;
     game->platforms_landed = 0;
     game->last_platform_landed = -1;
@@ -315,8 +359,24 @@ void init_game(GameState *game) {
     // Load game textures
     load_game_textures(game);
     
-    // Generate initial platforms
+    // Generate initial platforms FIRST
     generate_platforms(game, true);
+    
+    // NOW position player on the starting platform (first platform should be the starting one)
+    if (game->num_platforms > 0) {
+        Platform *start_platform = &game->platforms[0];
+        game->player.y = start_platform->y - game->player.height - 40;
+        // Center player on the starting platform
+        game->player.x = start_platform->x + (start_platform->width - game->player.width) / 2;
+        
+        // Initialize camera - position it to show the starting platform
+        game->camera_y = start_platform->y - WINDOW_HEIGHT + 100; // Show platform with some margin
+    } else {
+        // Fallback if no platforms generated (shouldn't happen)
+        float starting_platform_y = WINDOW_HEIGHT - PLATFORM_HEIGHT - 50;
+        game->player.y = starting_platform_y - PLAYER_HEIGHT;
+        game->camera_y = starting_platform_y - WINDOW_HEIGHT + 100;
+    }
 }
 
 // Generate platforms for the game (unified function for initial and ongoing generation)
@@ -770,6 +830,154 @@ void render_projectiles(GameState *game) {
     }
 }
 
+// Check if there's already a monster nearby to prevent clustering
+bool is_monster_nearby(GameState *game, float x, float y, float min_distance) {
+    for (int i = 0; i < game->num_monsters; i++) {
+        Monster *monster = &game->monsters[i];
+        if (!monster->active) continue;
+        
+        float dx = monster->x - x;
+        float dy = monster->y - y;
+        float distance = sqrtf(dx * dx + dy * dy);
+        
+        if (distance < min_distance) {
+            return true;
+        }
+    }
+    return false;
+}
+
+// Monster system functions
+void spawn_monster(GameState *game, float x, float y) {
+    if (game->num_monsters >= MAX_MONSTERS) return;
+    
+    // Check if there's already a monster nearby (prevent clustering)
+    if (is_monster_nearby(game, x, y, 150.0f)) { // 150 pixel minimum distance
+        return;
+    }
+    
+    Monster *monster = &game->monsters[game->num_monsters];
+    monster->x = x;
+    monster->y = y;
+    monster->vx = MONSTER_SPEED;
+    monster->width = MONSTER_WIDTH;
+    monster->height = MONSTER_HEIGHT;
+    monster->type = MONSTER_BASIC;
+    monster->active = true;
+    monster->move_direction = (rand() % 2) * 2 - 1; // Random -1 or 1
+    
+    game->num_monsters++;
+}
+
+void update_monsters(GameState *game, float delta_time) {
+    // Update all monsters
+    for (int i = 0; i < game->num_monsters; i++) {
+        Monster *monster = &game->monsters[i];
+        if (!monster->active) continue;
+        
+        // Update position (horizontal movement)
+        monster->x += monster->move_direction * monster->vx * delta_time * 60.0f; // Scale by ~60 FPS
+        
+        // Bounce off screen edges
+        if (monster->x <= 0) {
+            monster->x = 0;
+            monster->move_direction = 1.0f; // Move right
+        } else if (monster->x + monster->width >= WINDOW_WIDTH) {
+            monster->x = WINDOW_WIDTH - monster->width;
+            monster->move_direction = -1.0f; // Move left
+        }
+        
+        // Deactivate monsters that are too far below the camera (off-screen cleanup)
+        if (monster->y > game->camera_y + WINDOW_HEIGHT + 200) {
+            monster->active = false;
+        }
+    }
+    
+    // Remove inactive monsters by compacting the array
+    int write_index = 0;
+    for (int read_index = 0; read_index < game->num_monsters; read_index++) {
+        if (game->monsters[read_index].active) {
+            if (write_index != read_index) {
+                game->monsters[write_index] = game->monsters[read_index];
+            }
+            write_index++;
+        }
+    }
+    game->num_monsters = write_index;
+    
+    // Spawn new monsters based on score
+    if (game->score >= MONSTER_SPAWN_SCORE_MIN) {
+        // Count active monsters in current screen area
+        int monsters_on_screen = 0;
+        float screen_top = game->camera_y - WINDOW_HEIGHT;
+        float screen_bottom = game->camera_y + WINDOW_HEIGHT;
+        
+        for (int i = 0; i < game->num_monsters; i++) {
+            Monster *monster = &game->monsters[i];
+            if (monster->active && monster->y >= screen_top && monster->y <= screen_bottom) {
+                monsters_on_screen++;
+            }
+        }
+        
+        // Only spawn if there's no monster on the current screen
+        if (monsters_on_screen == 0) {
+            // Calculate spawn probability based on score
+            float spawn_chance = 0.0005f; // Base chance
+            if (game->score >= MONSTER_MAX_SCORE) {
+                spawn_chance = 0.005f; // Maximum spawn rate
+            } else {
+                // Linear increase from min to max score
+                float progress = (float)(game->score - MONSTER_SPAWN_SCORE_MIN) / (MONSTER_MAX_SCORE - MONSTER_SPAWN_SCORE_MIN);
+                spawn_chance = 0.0005f + progress * 0.0045f; // Increase to 0.005f
+            }
+            
+            // Try to spawn a monster (small random chance each frame)
+            if ((float)rand() / RAND_MAX < spawn_chance) {
+                float spawn_x = rand() % (WINDOW_WIDTH - MONSTER_WIDTH);
+                float spawn_y = game->camera_y - 100; // Spawn above camera view
+                spawn_monster(game, spawn_x, spawn_y);
+            }
+        }
+    }
+}
+
+void render_monsters(GameState *game) {
+    for (int i = 0; i < game->num_monsters; i++) {
+        Monster *monster = &game->monsters[i];
+        if (!monster->active) continue;
+        
+        SDL_FRect dest_rect = {
+            monster->x,
+            monster->y - game->camera_y,
+            monster->width,
+            monster->height
+        };
+        
+        if (game->monster_basic_texture) {
+            // Render monster texture
+            SDL_RenderTexture(game->renderer, game->monster_basic_texture, NULL, &dest_rect);
+        } else {
+            // Fallback: render red rectangle
+            SDL_SetRenderDrawColor(game->renderer, 255, 0, 0, 255); // Red
+            SDL_RenderFillRect(game->renderer, &dest_rect);
+        }
+    }
+}
+
+bool check_monster_collision(Player *player, Monster *monster) {
+    return (player->x < monster->x + monster->width &&
+            player->x + player->width > monster->x &&
+            player->y < monster->y + monster->height &&
+            player->y + player->height > monster->y);
+}
+
+bool check_projectile_monster_collision(Projectile *projectile, Monster *monster) {
+    return (projectile->x < monster->x + monster->width &&
+            projectile->x + PROJECTILE_WIDTH > monster->x &&
+            projectile->y < monster->y + monster->height &&
+            projectile->y + PROJECTILE_HEIGHT > monster->y);
+}
+
 // Update game logic
 void update_game(GameState *game, float delta_time) {
     if (!game->game_running) return;
@@ -863,6 +1071,38 @@ void update_game(GameState *game, float delta_time) {
     
     // Update projectiles
     update_projectiles(game, delta_time);
+    
+    // Update monsters
+    update_monsters(game, delta_time);
+    
+    // Check projectile-monster collisions
+    for (int i = 0; i < game->num_projectiles; i++) {
+        Projectile *projectile = &game->projectiles[i];
+        if (!projectile->active) continue;
+        
+        for (int j = 0; j < game->num_monsters; j++) {
+            Monster *monster = &game->monsters[j];
+            if (!monster->active) continue;
+            
+            if (check_projectile_monster_collision(projectile, monster)) {
+                // Destroy both projectile and monster
+                projectile->active = false;
+                monster->active = false;
+                break; // Exit inner loop since projectile is destroyed
+            }
+        }
+    }
+    
+    // Check player-monster collisions (game over)
+    for (int i = 0; i < game->num_monsters; i++) {
+        Monster *monster = &game->monsters[i];
+        if (!monster->active) continue;
+        
+        if (check_monster_collision(player, monster)) {
+            game->game_running = false; // Game over
+            break;
+        }
+    }
     
     // Update score based on height (platforms passed)
     int new_score = (int)(-game->camera_y / 10);
@@ -1024,6 +1264,9 @@ void render_game(GameState *game) {
     
     // Render projectiles
     render_projectiles(game);
+    
+    // Render monsters
+    render_monsters(game);
     
     // Render player
     SDL_FRect player_rect = {

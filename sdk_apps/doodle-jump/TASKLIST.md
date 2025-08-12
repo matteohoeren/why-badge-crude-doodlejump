@@ -66,14 +66,20 @@
 - [x] **COMPLETED** - Make jumps slightly easier to reach (increased jump force to -20.0f and reduced platform spacing)
 - [x] **COMPLETED** - Implement infinite platform generation (platforms generate infinitely as player moves up) ✅ Just implemented!
 
-### Phase 7: Monster System (Later Implementation)
-- [ ] Add monster data structures
-- [ ] Implement monster movement 
-- [ ] Implement different monster strengths at different scores. 
-- [ ] Add collision detection between bullets and monsters
-- [ ] Add monster destruction mechanics
-- [ ] Implement shooting mechanism (Enter key to shoot upwards)
-- [ ] Add visual feedback for shooting
+### Phase 7: Monster System
+- [x] **COMPLETED** - Implement shooting mechanism (Enter key to shoot upwards) ✅ Working with projectiles!
+- [x] **COMPLETED** - Add visual feedback for shooting ✅ Player changes to yellow when shooting!
+- [ ] **IN PROGRESS** - Monster data structures and basic rendering
+  - [ ] Step 7.1: Add Monster structure (position, type, active state)
+  - [ ] Step 7.2: Add monster texture loading from game_tiles.png (sprite extraction)
+  - [ ] Step 7.3: Add monster spawning system (score 1000-1500 trigger, max at 5000)
+  - [ ] Step 7.4: Implement monster rendering
+  - [ ] Step 7.5: Add monster movement patterns (simple horizontal movement)
+- [ ] Add collision detection between player and monsters (game over)
+- [ ] Add collision detection between projectiles and monsters (monster destruction)
+- [ ] Implement monster difficulty scaling (more monsters at higher scores)
+- [ ] Add different monster types and behaviors
+- [ ] Add visual effects for monster destruction
 
 ### Phase 8: Visual Enhancements
 - [ ] Particle effects for jumping
