@@ -221,13 +221,16 @@ void load_game_textures(GameState *game) {
     game->player_left_texture = load_texture_from_file(game->renderer, "assets/player_left.png");
     game->player_right_texture = load_texture_from_file(game->renderer, "assets/player_right.png");
     
-    // Load platform textures from sprite sheet (trying different positions)
-    // Assuming 80x15 pixel platforms in the sprite sheet
-    game->platform_normal_texture = load_tile_from_sprite_sheet(game->renderer, "assets/game_tiles.png", 0, 0, 80, 15);
-    game->platform_moving_texture = load_tile_from_sprite_sheet(game->renderer, "assets/game_tiles.png", 0, 20, 80, 15);
-    game->platform_breakable_texture = load_tile_from_sprite_sheet(game->renderer, "assets/game_tiles.png", 0, 40, 80, 15);
-    game->platform_spring_texture = load_tile_from_sprite_sheet(game->renderer, "assets/game_tiles.png", 0, 60, 80, 15);
-    
+    // Load platform textures from sprite sheet (adjusted positions and heights)
+    // Standard platform: made taller to include bottom pixels
+    game->platform_normal_texture = load_tile_from_sprite_sheet(game->renderer, "assets/game_tiles.png", 0, 0, 65, 18);
+    // Moving platform: works perfectly, keep as is
+    game->platform_moving_texture = load_tile_from_sprite_sheet(game->renderer, "assets/game_tiles.png", 0, 18, 65, 18);
+    // Breakable platform: normal state
+    game->platform_breakable_texture = load_tile_from_sprite_sheet(game->renderer, "assets/game_tiles.png", 0, 70, 65, 18);
+    // Spring platform: try different position
+    game->platform_spring_texture = load_tile_from_sprite_sheet(game->renderer, "assets/game_tiles.png", 0, 35, 65, 18);
+
     game->background_texture = load_texture_from_file(game->renderer, "assets/background.png");
     
     printf("Loaded textures: left=%p, right=%p, normal=%p, moving=%p, breakable=%p, spring=%p, bg=%p\n",
