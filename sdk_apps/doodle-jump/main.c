@@ -8,6 +8,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <string.h>
+#include <time.h>  // For time() to seed rand()
 
 #define SDL_MAIN_USE_CALLBACKS 1
 #include <SDL3/SDL.h>
@@ -15,9 +16,16 @@
 
 // Image loading support - declaration only
 // Implementation is in image.c to avoid TLS issues
+#ifdef BADGEVMS_BUILD
 unsigned char *stbi_load(char const *filename, int *x, int *y, int *comp, int req_comp);
 void stbi_image_free(void *retval_from_stbi_load);
 const char *stbi_failure_reason(void);
+#else
+// For local SDL3 builds, we'll use simple fallback or disable image loading
+#define stbi_load(filename, x, y, comp, req_comp) NULL
+#define stbi_image_free(ptr) do {} while(0)
+#define stbi_failure_reason() "Image loading disabled for local builds"
+#endif
 
 // Include BadgeVMS device support for BMI270 (only when building for badge hardware)
 #ifdef BADGEVMS_BUILD
@@ -25,13 +33,18 @@ const char *stbi_failure_reason(void);
 #endif
 
 // Memory optimization flag
-#define USE_IMAGES 1  // Set to 1 to enable doodle character assets (R, L, Shooting)
+#define USE_IMAGES 1  // Enable images for both BadgeVMS and local builds
 
 // Game constants
+#ifdef BADGEVMS_BUILD
 #define WINDOW_WIDTH           720  // Full screen width for BadgeVMS
 #define WINDOW_HEIGHT          720  // Full screen height for BadgeVMS
-#define PLAYER_WIDTH           40
-#define PLAYER_HEIGHT          40
+#else
+#define WINDOW_WIDTH           480  // Smaller window for local testing
+#define WINDOW_HEIGHT          640  // Smaller window for local testing
+#endif
+#define PLAYER_WIDTH           52   // Increased by 30% from 40
+#define PLAYER_HEIGHT          52   // Increased by 30% from 40
 #define PLATFORM_WIDTH         65
 #define PLATFORM_HEIGHT        15
 #define MAX_PLATFORMS          100
@@ -177,13 +190,17 @@ void cleanup_textures(GameState *game);
 
 // Load texture from image file using stb_image
 SDL_Texture* load_texture_from_file(SDL_Renderer *renderer, const char *filename) {
+#ifdef BADGEVMS_BUILD
     int width, height, channels;
+    printf("Attempting to load image: %s\n", filename);
     unsigned char *image_data = stbi_load(filename, &width, &height, &channels, 4); // Force 4 channels (RGBA)
     
     if (!image_data) {
         printf("Failed to load image %s: %s\n", filename, stbi_failure_reason());
         return NULL;
     }
+    
+    printf("Loaded image %s: %dx%d, %d channels, size: %d bytes\n", filename, width, height, channels, width * height * 4);
     
     // Create SDL surface from image data
     SDL_Surface *surface = SDL_CreateSurfaceFrom(width, height, SDL_PIXELFORMAT_RGBA32, image_data, width * 4);
@@ -193,10 +210,14 @@ SDL_Texture* load_texture_from_file(SDL_Renderer *renderer, const char *filename
         return NULL;
     }
     
+    printf("Created surface for %s\n", filename);
+    
     // Create texture from surface
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
     if (!texture) {
         printf("Failed to create texture from image %s: %s\n", filename, SDL_GetError());
+    } else {
+        printf("Successfully created texture for %s\n", filename);
     }
     
     // Cleanup
@@ -204,11 +225,48 @@ SDL_Texture* load_texture_from_file(SDL_Renderer *renderer, const char *filename
     stbi_image_free(image_data);
     
     return texture;
+#else
+    // For local builds, use SDL's built-in BMP loading or create colored rectangles
+    printf("Local build: Creating colored rectangle for %s\n", filename);
+    
+    // Create a simple colored texture as fallback
+    SDL_Surface *surface = SDL_CreateSurface(PLAYER_WIDTH, PLAYER_HEIGHT, SDL_PIXELFORMAT_RGBA32);
+    if (!surface) {
+        printf("Failed to create surface: %s\n", SDL_GetError());
+        return NULL;
+    }
+    
+    // Fill with different colors based on filename
+    Uint32 color;
+    const SDL_PixelFormatDetails *format_details = SDL_GetPixelFormatDetails(surface->format);
+    if (strstr(filename, "player_left")) {
+        color = SDL_MapRGBA(format_details, NULL, 100, 255, 100, 255); // Light green
+    } else if (strstr(filename, "player_right")) {
+        color = SDL_MapRGBA(format_details, NULL, 100, 100, 255, 255); // Light blue
+    } else if (strstr(filename, "player_shoot")) {
+        color = SDL_MapRGBA(format_details, NULL, 255, 255, 100, 255); // Yellow
+    } else {
+        color = SDL_MapRGBA(format_details, NULL, 200, 200, 200, 255); // Light gray
+    }
+    
+    SDL_FillSurfaceRect(surface, NULL, color);
+    
+    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_DestroySurface(surface);
+    
+    if (texture) {
+        printf("Created colored texture for %s\n", filename);
+    }
+    
+    return texture;
+#endif
 }
 
 // Load a specific tile from a sprite sheet
 SDL_Texture* load_tile_from_sprite_sheet(SDL_Renderer *renderer, const char *filename, int tile_x, int tile_y, int tile_width, int tile_height) {
+#ifdef BADGEVMS_BUILD
     int width, height, channels;
+    printf("Loading tile from sprite sheet: %s (tile: %d,%d size: %dx%d)\n", filename, tile_x, tile_y, tile_width, tile_height);
     unsigned char *image_data = stbi_load(filename, &width, &height, &channels, 4); // Force 4 channels (RGBA)
     
     if (!image_data) {
@@ -216,10 +274,12 @@ SDL_Texture* load_tile_from_sprite_sheet(SDL_Renderer *renderer, const char *fil
         return NULL;
     }
     
+    printf("Sprite sheet loaded: %dx%d, %d channels\n", width, height, channels);
+    
     // Create a smaller image buffer for the tile
     unsigned char *tile_data = (unsigned char*)malloc(tile_width * tile_height * 4);
     if (!tile_data) {
-        printf("Failed to allocate memory for tile\n");
+        printf("Failed to allocate memory for tile data\n");
         stbi_image_free(image_data);
         return NULL;
     }
@@ -262,6 +322,8 @@ SDL_Texture* load_tile_from_sprite_sheet(SDL_Renderer *renderer, const char *fil
     SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
     if (!texture) {
         printf("Failed to create texture from tile: %s\n", SDL_GetError());
+    } else {
+        printf("Successfully created tile texture (%dx%d)\n", tile_width, tile_height);
     }
     
     // Cleanup
@@ -270,18 +332,42 @@ SDL_Texture* load_tile_from_sprite_sheet(SDL_Renderer *renderer, const char *fil
     stbi_image_free(image_data);
     
     return texture;
+#else
+    // For local builds, create colored rectangles for different platform types
+    printf("Local build: Creating colored platform tile\n");
+    
+    SDL_Surface *surface = SDL_CreateSurface(tile_width, tile_height, SDL_PIXELFORMAT_RGBA32);
+    if (!surface) {
+        printf("Failed to create surface: %s\n", SDL_GetError());
+        return NULL;
+    }
+    
+    // Different colors for different platform types based on tile_y position
+    Uint32 color;
+    const SDL_PixelFormatDetails *format_details = SDL_GetPixelFormatDetails(surface->format);
+    if (tile_y == 0) {
+        color = SDL_MapRGBA(format_details, NULL, 34, 139, 34, 255); // Forest green (normal)
+    } else if (tile_y == 18) {
+        color = SDL_MapRGBA(format_details, NULL, 255, 165, 0, 255); // Orange (moving)
+    } else if (tile_y == 35) {
+        color = SDL_MapRGBA(format_details, NULL, 255, 20, 147, 255); // Deep pink (spring)
+    } else if (tile_y == 70) {
+        color = SDL_MapRGBA(format_details, NULL, 139, 69, 19, 255); // Brown (breakable)
+    } else {
+        color = SDL_MapRGBA(format_details, NULL, 128, 128, 128, 255); // Gray (default)
+    }
+    
+    SDL_FillSurfaceRect(surface, NULL, color);
+    
+    SDL_Texture *texture = SDL_CreateTextureFromSurface(renderer, surface);
+    SDL_DestroySurface(surface);
+    
+    return texture;
+#endif
 }
 
 // Load all game textures
 void load_game_textures(GameState *game) {
-    // Initialize all textures to NULL
-    game->player_left_texture = NULL;
-    game->player_right_texture = NULL;
-    game->player_shoot_texture = NULL;
-    game->projectile_texture = NULL;
-    game->monster_basic_texture = NULL;
-    game->platform_normal_texture = NULL;
-    game->platform_moving_texture = NULL;
     // Initialize all texture pointers to NULL first
     game->player_left_texture = NULL;
     game->player_right_texture = NULL;
@@ -293,23 +379,64 @@ void load_game_textures(GameState *game) {
     game->platform_breakable_texture = NULL;
     game->platform_spring_texture = NULL;
     game->background_texture = NULL;
+    game->background_texture = NULL;
     
 #if USE_IMAGES
-    printf("Loading only doodle character textures (R, L, Shooting)...\n");
-    // Load only the player character textures for memory efficiency
+    printf("Loading doodle character and platform textures...\n");
+    
+    // Load only the most essential player character textures one by one with error checking
+    printf("Loading player_left.png...\n");
     game->player_left_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]player_left.png");
+    if (!game->player_left_texture) {
+        printf("ERROR: Failed to load player_left.png\n");
+        return;
+    }
+    
+    printf("Loading player_right.png...\n");
     game->player_right_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]player_right.png");
+    if (!game->player_right_texture) {
+        printf("ERROR: Failed to load player_right.png\n");
+        return;
+    }
+    
+    printf("Loading player_shoot.png...\n");
     game->player_shoot_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]player_shoot.png");
+    if (!game->player_shoot_texture) {
+        printf("ERROR: Failed to load player_shoot.png\n");
+        return;
+    }
     
-    // Only load projectile texture for shooting functionality
-    game->projectile_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]projectile.png");
+    // Load platform textures from sprite sheet
+    printf("Loading platform textures from game_tiles.png...\n");
+    game->platform_normal_texture = load_tile_from_sprite_sheet(game->renderer, "APPS:[DOODLE-JUMP]game_tiles.png", 0, 0, 65, 18);
+    if (!game->platform_normal_texture) {
+        printf("ERROR: Failed to load normal platform texture\n");
+        return;
+    }
     
-    // Skip platform, monster, and background textures to save memory
-    // These will use colored rectangles as fallback
+    game->platform_moving_texture = load_tile_from_sprite_sheet(game->renderer, "APPS:[DOODLE-JUMP]game_tiles.png", 0, 18, 65, 18);
+    if (!game->platform_moving_texture) {
+        printf("ERROR: Failed to load moving platform texture\n");
+        return;
+    }
     
-    printf("Loaded player textures: left=%p, right=%p, shoot=%p, projectile=%p\n",
-           (void*)game->player_left_texture, (void*)game->player_right_texture, 
-           (void*)game->player_shoot_texture, (void*)game->projectile_texture);
+    game->platform_breakable_texture = load_tile_from_sprite_sheet(game->renderer, "APPS:[DOODLE-JUMP]game_tiles.png", 0, 70, 65, 18);
+    if (!game->platform_breakable_texture) {
+        printf("ERROR: Failed to load breakable platform texture\n");
+        return;
+    }
+    
+    game->platform_spring_texture = load_tile_from_sprite_sheet(game->renderer, "APPS:[DOODLE-JUMP]game_tiles.png", 0, 35, 65, 18);
+    if (!game->platform_spring_texture) {
+        printf("ERROR: Failed to load spring platform texture\n");
+        return;
+    }
+    
+    // Skip projectile and background for now to keep memory usage reasonable
+    // game->projectile_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]projectile.png");
+    // game->background_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]background.png");
+    
+    printf("Successfully loaded player and platform textures!\n");
 #else
     printf("Skipping texture loading - using colored rectangles for better memory usage\n");
 #endif
@@ -372,6 +499,9 @@ void init_game(GameState *game) {
     if (game->orientation == NULL) {
         printf("Warning: BMI270 orientation sensor not found - tilt controls disabled\n");
     }
+#else
+    // Seed random number generator for local builds
+    srand((unsigned int)time(NULL));
 #endif
     
     // Load game textures
@@ -420,22 +550,36 @@ void generate_platforms(GameState *game, bool is_initial_generation) {
         for (int i = 1; i < MAX_PLATFORMS && current_y > -1000; i++) {
             Platform *platform = &game->platforms[game->num_platforms++];
             
+#ifdef BADGEVMS_BUILD
             platform->x = (float)(SDL_rand(WINDOW_WIDTH - (int)PLATFORM_WIDTH));
+#else
+            // For local builds, use standard rand()
+            platform->x = (float)(rand() % (WINDOW_WIDTH - (int)PLATFORM_WIDTH));
+#endif
             platform->y = current_y;
             platform->width = PLATFORM_WIDTH;
             platform->height = PLATFORM_HEIGHT;
             platform->active = true;
             
             // Set platform type and properties using helper logic
+#ifdef BADGEVMS_BUILD
             int rand_type = SDL_rand(100);
+#else
+            int rand_type = rand() % 100;
+#endif
             if (rand_type < 85) {
                 platform->type = PLATFORM_NORMAL;
                 platform->move_direction = 0;
                 platform->move_speed = 0;
             } else if (rand_type < 90) {
                 platform->type = PLATFORM_MOVING;
+#ifdef BADGEVMS_BUILD
                 platform->move_direction = (SDL_rand(2) == 0) ? 1.0f : -1.0f;
                 platform->move_speed = game->score / 800.0f + (float)(SDL_rand(4)) / 20.0f;
+#else
+                platform->move_direction = (rand() % 2 == 0) ? 1.0f : -1.0f;
+                platform->move_speed = game->score / 800.0f + (float)(rand() % 4) / 20.0f;
+#endif
                 if (platform->move_speed < 0.5f) platform->move_speed = 0.5f;
                 else if (platform->move_speed > 1.0f) platform->move_speed = 1.0f;
             } else if (rand_type < 95) {
@@ -1380,8 +1524,12 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
     
     *appstate = game;
     
-    // Create fullscreen window
+    // Create window - fullscreen for badge, windowed for local testing
+#ifdef BADGEVMS_BUILD
     game->window = SDL_CreateWindow("Doodle Jump - BadgeVMS", WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_FULLSCREEN);
+#else
+    game->window = SDL_CreateWindow("Doodle Jump - Local Test", WINDOW_WIDTH, WINDOW_HEIGHT, 0);
+#endif
     if (!game->window) {
         printf("Failed to create window: %s\n", SDL_GetError());
         return SDL_APP_FAILURE;
@@ -1455,6 +1603,9 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
                 case SDL_SCANCODE_R:
                     game->restart_pressed = true;
                     break;
+                default:
+                    // Ignore other keys
+                    break;
             }
             break;
         case SDL_EVENT_KEY_UP:
@@ -1475,6 +1626,9 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
                     break;
                 case SDL_SCANCODE_R:
                     game->restart_pressed = false;
+                    break;
+                default:
+                    // Ignore other keys
                     break;
             }
             break;
