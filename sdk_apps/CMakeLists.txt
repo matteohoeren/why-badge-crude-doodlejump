@@ -124,10 +124,10 @@ endfunction()
 #      main.c
 # )
 
-build_app(doodle-jump
-    SOURCES 
-     main.c
-)
+# build_app(doodle-jump
+#     SOURCES 
+#      main.c
+# )
 
 #build_app(bench_basic_a
 #    SOURCES 
