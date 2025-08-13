@@ -1,0 +1,10 @@
+{
+    "unique_identifier": "doodle-jump",
+    "name": "Doodle Jump",
+    "author": "Matze & Joshi",
+    "version": "1",
+    "interpreter": "",
+    "metadata_file": "",
+    "binary_path": "doodle_jumpp.elf",
+    "source": 1
+}
