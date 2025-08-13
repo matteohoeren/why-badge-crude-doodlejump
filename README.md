@@ -7,6 +7,12 @@ Find the actual app in sdk_apps/doodle-jump
 
 Refer to the WHY2025 Wiki on how to install a firmware/app in your badge.
 
+## Game controls
+Right now, navigate your doodle with R & L Keys. 
+Use "r" to restart after GAME OVER.
+A tilt-control is intended, but is still WIP.
+Assets also kind of work, but are for now disabled since the game crashes otherwise.
+
 Here is the original BadgeVMS Readme:
 
 # Welcome to BadgeVMS
