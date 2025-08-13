@@ -13,18 +13,23 @@
 #include <SDL3/SDL.h>
 #include <SDL3/SDL_main.h>
 
-// Image loading support
-#define STB_IMAGE_IMPLEMENTATION
-#include "stb_image.h"
+// Image loading support - declaration only
+// Implementation is in image.c to avoid TLS issues
+unsigned char *stbi_load(char const *filename, int *x, int *y, int *comp, int req_comp);
+void stbi_image_free(void *retval_from_stbi_load);
+const char *stbi_failure_reason(void);
 
 // Include BadgeVMS device support for BMI270 (only when building for badge hardware)
 #ifdef BADGEVMS_BUILD
 #include "badgevms/device.h"
 #endif
 
+// Memory optimization flag
+#define USE_IMAGES 0  // Set to 0 to use colored rectangles instead of images
+
 // Game constants
-#define WINDOW_WIDTH           576
-#define WINDOW_HEIGHT          432
+#define WINDOW_WIDTH           720  // Full screen width for BadgeVMS
+#define WINDOW_HEIGHT          720  // Full screen height for BadgeVMS
 #define PLAYER_WIDTH           40
 #define PLAYER_HEIGHT          40
 #define PLATFORM_WIDTH         65
@@ -119,7 +124,17 @@ typedef struct {
     int platforms_landed; // Count of platforms landed on
     int last_platform_landed; // Index of last platform landed on to avoid double counting
     bool game_running;
+<<<<<<< HEAD
     Uint64 last_time;
+=======
+    Uint32 last_time;  // Changed from Uint64 to avoid 64-bit float conversion issues
+    
+    // Input state for event-based controls
+    bool left_pressed;
+    bool right_pressed;
+    bool shoot_pressed;
+    bool restart_pressed;
+>>>>>>> 6ac8a62 (Fixed build for badge, added image loading flag)
     
     // Textures for graphics
     SDL_Texture *player_left_texture;
@@ -271,10 +286,22 @@ void load_game_textures(GameState *game) {
     game->monster_basic_texture = NULL;
     game->platform_normal_texture = NULL;
     game->platform_moving_texture = NULL;
+<<<<<<< HEAD
+=======
+    // Initialize all texture pointers to NULL first
+    game->player_left_texture = NULL;
+    game->player_right_texture = NULL;
+    game->player_shoot_texture = NULL;
+    game->projectile_texture = NULL;
+    game->monster_basic_texture = NULL;
+    game->platform_normal_texture = NULL;
+    game->platform_moving_texture = NULL;
+>>>>>>> 6ac8a62 (Fixed build for badge, added image loading flag)
     game->platform_breakable_texture = NULL;
     game->platform_spring_texture = NULL;
     game->background_texture = NULL;
     
+<<<<<<< HEAD
     // Try to load textures (if files don't exist, we'll fall back to rectangles)
     game->player_left_texture = load_texture_from_file(game->renderer, "assets/player_left.png");
     game->player_right_texture = load_texture_from_file(game->renderer, "assets/player_right.png");
@@ -295,12 +322,42 @@ void load_game_textures(GameState *game) {
     game->monster_basic_texture = load_tile_from_sprite_sheet(game->renderer, "assets/game_tiles.png", 65, 0, 70, 90);
 
     game->background_texture = load_texture_from_file(game->renderer, "assets/background.png");
+=======
+#if USE_IMAGES
+    printf("Loading textures using BadgeVMS file paths...\n");
+    // Try to load textures using BadgeVMS file paths
+    game->player_left_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]player_left.png");
+    game->player_right_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]player_right.png");
+    game->player_shoot_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]player_shoot.png");
+    game->projectile_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]projectile.png");
+    
+    // Load platform textures from sprite sheet using BadgeVMS file paths
+    // Standard platform: made taller to include bottom pixels
+    game->platform_normal_texture = load_tile_from_sprite_sheet(game->renderer, "APPS:[DOODLE-JUMP]game_tiles.png", 0, 0, 65, 18);
+    // Moving platform: works perfectly, keep as is
+    game->platform_moving_texture = load_tile_from_sprite_sheet(game->renderer, "APPS:[DOODLE-JUMP]game_tiles.png", 0, 18, 65, 18);
+    // Breakable platform: normal state
+    game->platform_breakable_texture = load_tile_from_sprite_sheet(game->renderer, "APPS:[DOODLE-JUMP]game_tiles.png", 0, 70, 65, 18);
+    // Spring platform: try different position
+    game->platform_spring_texture = load_tile_from_sprite_sheet(game->renderer, "APPS:[DOODLE-JUMP]game_tiles.png", 0, 35, 65, 18);
+
+    // Load monster textures from sprite sheet (to the right of platforms)
+    game->monster_basic_texture = load_tile_from_sprite_sheet(game->renderer, "APPS:[DOODLE-JUMP]game_tiles.png", 65, 0, 70, 90);
+
+    game->background_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]background.png");
+>>>>>>> 6ac8a62 (Fixed build for badge, added image loading flag)
     
     printf("Loaded textures: left=%p, right=%p, normal=%p, moving=%p, breakable=%p, spring=%p, monster=%p, bg=%p\n",
            (void*)game->player_left_texture, (void*)game->player_right_texture, 
            (void*)game->platform_normal_texture, (void*)game->platform_moving_texture,
            (void*)game->platform_breakable_texture, (void*)game->platform_spring_texture,
            (void*)game->monster_basic_texture, (void*)game->background_texture);
+<<<<<<< HEAD
+=======
+#else
+    printf("Skipping texture loading - using colored rectangles for better memory usage\n");
+#endif
+>>>>>>> 6ac8a62 (Fixed build for badge, added image loading flag)
 }
 
 // Cleanup all textures
@@ -348,6 +405,15 @@ void init_game(GameState *game) {
     game->last_platform_landed = -1;
     game->game_running = true;
     
+<<<<<<< HEAD
+=======
+    // Initialize input state
+    game->left_pressed = false;
+    game->right_pressed = false;
+    game->shoot_pressed = false;
+    game->restart_pressed = false;
+    
+>>>>>>> 6ac8a62 (Fixed build for badge, added image loading flag)
 #ifdef BADGEVMS_BUILD
     // Initialize BMI270 orientation sensor
     game->orientation = (orientation_device_t *)device_get("ORIENTATION0");
@@ -1123,12 +1189,21 @@ void handle_input(GameState *game, const bool *keyboard_state, float delta_time)
     // Horizontal movement with acceleration
     float target_vx = 0;
     
+<<<<<<< HEAD
     // Keyboard controls (Left/Right movement)
     if (keyboard_state[SDL_SCANCODE_LEFT] || keyboard_state[SDL_SCANCODE_A]) {
         target_vx = -PLAYER_SPEED;
         player->facing_direction = -1; // Face left
     }
     if (keyboard_state[SDL_SCANCODE_RIGHT] || keyboard_state[SDL_SCANCODE_D]) {
+=======
+    // Use event-based controls instead of keyboard polling for better badge compatibility
+    if (game->left_pressed) {
+        target_vx = -PLAYER_SPEED;
+        player->facing_direction = -1; // Face left
+    }
+    if (game->right_pressed) {
+>>>>>>> 6ac8a62 (Fixed build for badge, added image loading flag)
         target_vx = PLAYER_SPEED;
         player->facing_direction = 1; // Face right
     }
@@ -1178,6 +1253,7 @@ void handle_input(GameState *game, const bool *keyboard_state, float delta_time)
         player->vx *= PLAYER_FRICTION;
     }
     
+<<<<<<< HEAD
     // Shooting input
     if (keyboard_state[SDL_SCANCODE_RETURN] && game->game_running) {
         shoot_projectile(game);
@@ -1185,6 +1261,15 @@ void handle_input(GameState *game, const bool *keyboard_state, float delta_time)
     
     // Restart game
     if (keyboard_state[SDL_SCANCODE_R] && !game->game_running) {
+=======
+    // Shooting input - use event-based controls
+    if (game->shoot_pressed && game->game_running) {
+        shoot_projectile(game);
+    }
+    
+    // Restart game - use event-based controls
+    if (game->restart_pressed && !game->game_running) {
+>>>>>>> 6ac8a62 (Fixed build for badge, added image loading flag)
         init_game(game);
     }
 }
@@ -1362,8 +1447,13 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
     
     *appstate = game;
     
+<<<<<<< HEAD
     // Create window
     game->window = SDL_CreateWindow("Doodle Jump - BadgeVMS", WINDOW_WIDTH, WINDOW_HEIGHT, 0);
+=======
+    // Create fullscreen window
+    game->window = SDL_CreateWindow("Doodle Jump - BadgeVMS", WINDOW_WIDTH, WINDOW_HEIGHT, SDL_WINDOW_FULLSCREEN);
+>>>>>>> 6ac8a62 (Fixed build for badge, added image loading flag)
     if (!game->window) {
         printf("Failed to create window: %s\n", SDL_GetError());
         return SDL_APP_FAILURE;
@@ -1378,7 +1468,11 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
     
     // Initialize game
     init_game(game);
+<<<<<<< HEAD
     game->last_time = SDL_GetTicks();
+=======
+    game->last_time = (Uint32)SDL_GetTicks();  // Cast to 32-bit
+>>>>>>> 6ac8a62 (Fixed build for badge, added image loading flag)
     
     return SDL_APP_CONTINUE;
 }
@@ -1386,9 +1480,20 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
 SDL_AppResult SDL_AppIterate(void *appstate) {
     GameState *game = (GameState *)appstate;
     
+<<<<<<< HEAD
     // Calculate delta time
     Uint64 current_time = SDL_GetTicks();
     float delta_time = (float)(current_time - game->last_time) / 16.0f; // Normalize to ~60 FPS
+=======
+    // Calculate delta time using 32-bit arithmetic to avoid __floatundisf
+    Uint32 current_time = (Uint32)SDL_GetTicks();  // Cast to 32-bit
+    Uint32 time_diff = current_time - game->last_time;
+    
+    // Cap delta_time to prevent physics explosions on first frame or long pauses
+    if (time_diff > 100) time_diff = 100;  // Max 100ms per frame
+    
+    float delta_time = (float)time_diff / 16.0f; // Normalize to ~60 FPS
+>>>>>>> 6ac8a62 (Fixed build for badge, added image loading flag)
     game->last_time = current_time;
     
     // Handle input
@@ -1405,6 +1510,11 @@ SDL_AppResult SDL_AppIterate(void *appstate) {
 }
 
 SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
+<<<<<<< HEAD
+=======
+    GameState *game = (GameState *)appstate;
+    
+>>>>>>> 6ac8a62 (Fixed build for badge, added image loading flag)
     switch (event->type) {
         case SDL_EVENT_QUIT:
             return SDL_APP_SUCCESS;
@@ -1412,6 +1522,47 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
             if (event->key.scancode == SDL_SCANCODE_ESCAPE) {
                 return SDL_APP_SUCCESS;
             }
+<<<<<<< HEAD
+=======
+            // Handle button presses
+            switch (event->key.scancode) {
+                case SDL_SCANCODE_LEFT:
+                case SDL_SCANCODE_A:
+                    game->left_pressed = true;
+                    break;
+                case SDL_SCANCODE_RIGHT:
+                case SDL_SCANCODE_D:
+                    game->right_pressed = true;
+                    break;
+                case SDL_SCANCODE_RETURN:
+                case SDL_SCANCODE_SPACE:
+                    game->shoot_pressed = true;
+                    break;
+                case SDL_SCANCODE_R:
+                    game->restart_pressed = true;
+                    break;
+            }
+            break;
+        case SDL_EVENT_KEY_UP:
+            // Handle button releases
+            switch (event->key.scancode) {
+                case SDL_SCANCODE_LEFT:
+                case SDL_SCANCODE_A:
+                    game->left_pressed = false;
+                    break;
+                case SDL_SCANCODE_RIGHT:
+                case SDL_SCANCODE_D:
+                    game->right_pressed = false;
+                    break;
+                case SDL_SCANCODE_RETURN:
+                case SDL_SCANCODE_SPACE:
+                    game->shoot_pressed = false;
+                    break;
+                case SDL_SCANCODE_R:
+                    game->restart_pressed = false;
+                    break;
+            }
+>>>>>>> 6ac8a62 (Fixed build for badge, added image loading flag)
             break;
         default:
             break;
