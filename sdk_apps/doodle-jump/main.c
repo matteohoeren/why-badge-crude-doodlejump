@@ -25,7 +25,7 @@ const char *stbi_failure_reason(void);
 #endif
 
 // Memory optimization flag
-#define USE_IMAGES 0  // Set to 0 to use colored rectangles instead of images
+#define USE_IMAGES 1  // Set to 1 to enable doodle character assets (R, L, Shooting)
 
 // Game constants
 #define WINDOW_WIDTH           720  // Full screen width for BadgeVMS
@@ -295,33 +295,21 @@ void load_game_textures(GameState *game) {
     game->background_texture = NULL;
     
 #if USE_IMAGES
-    printf("Loading textures using BadgeVMS file paths...\n");
-    // Try to load textures using BadgeVMS file paths
+    printf("Loading only doodle character textures (R, L, Shooting)...\n");
+    // Load only the player character textures for memory efficiency
     game->player_left_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]player_left.png");
     game->player_right_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]player_right.png");
     game->player_shoot_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]player_shoot.png");
+    
+    // Only load projectile texture for shooting functionality
     game->projectile_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]projectile.png");
     
-    // Load platform textures from sprite sheet using BadgeVMS file paths
-    // Standard platform: made taller to include bottom pixels
-    game->platform_normal_texture = load_tile_from_sprite_sheet(game->renderer, "APPS:[DOODLE-JUMP]game_tiles.png", 0, 0, 65, 18);
-    // Moving platform: works perfectly, keep as is
-    game->platform_moving_texture = load_tile_from_sprite_sheet(game->renderer, "APPS:[DOODLE-JUMP]game_tiles.png", 0, 18, 65, 18);
-    // Breakable platform: normal state
-    game->platform_breakable_texture = load_tile_from_sprite_sheet(game->renderer, "APPS:[DOODLE-JUMP]game_tiles.png", 0, 70, 65, 18);
-    // Spring platform: try different position
-    game->platform_spring_texture = load_tile_from_sprite_sheet(game->renderer, "APPS:[DOODLE-JUMP]game_tiles.png", 0, 35, 65, 18);
-
-    // Load monster textures from sprite sheet (to the right of platforms)
-    game->monster_basic_texture = load_tile_from_sprite_sheet(game->renderer, "APPS:[DOODLE-JUMP]game_tiles.png", 65, 0, 70, 90);
-
-    game->background_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]background.png");
+    // Skip platform, monster, and background textures to save memory
+    // These will use colored rectangles as fallback
     
-    printf("Loaded textures: left=%p, right=%p, normal=%p, moving=%p, breakable=%p, spring=%p, monster=%p, bg=%p\n",
+    printf("Loaded player textures: left=%p, right=%p, shoot=%p, projectile=%p\n",
            (void*)game->player_left_texture, (void*)game->player_right_texture, 
-           (void*)game->platform_normal_texture, (void*)game->platform_moving_texture,
-           (void*)game->platform_breakable_texture, (void*)game->platform_spring_texture,
-           (void*)game->monster_basic_texture, (void*)game->background_texture);
+           (void*)game->player_shoot_texture, (void*)game->projectile_texture);
 #else
     printf("Skipping texture loading - using colored rectangles for better memory usage\n");
 #endif
@@ -1461,6 +1449,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
                     break;
                 case SDL_SCANCODE_RETURN:
                 case SDL_SCANCODE_SPACE:
+                case SDL_SCANCODE_C:  // Raw scancode 0x2c for shooting
                     game->shoot_pressed = true;
                     break;
                 case SDL_SCANCODE_R:
@@ -1481,6 +1470,7 @@ SDL_AppResult SDL_AppEvent(void *appstate, SDL_Event *event) {
                     break;
                 case SDL_SCANCODE_RETURN:
                 case SDL_SCANCODE_SPACE:
+                case SDL_SCANCODE_C:  // Raw scancode 0x2c for shooting
                     game->shoot_pressed = false;
                     break;
                 case SDL_SCANCODE_R:
