@@ -25,15 +25,15 @@ const char *stbi_failure_reason(void);
 #endif
 
 // Memory optimization flag
-#define USE_IMAGES 0  // Set to 0 to use colored rectangles instead of images
+#define USE_IMAGES 1  // Temporarily disable images to test if basic game works
 
 // Game constants
 #define WINDOW_WIDTH           720  // Full screen width for BadgeVMS
 #define WINDOW_HEIGHT          720  // Full screen height for BadgeVMS
-#define PLAYER_WIDTH           40
-#define PLAYER_HEIGHT          40
-#define PLATFORM_WIDTH         65
-#define PLATFORM_HEIGHT        15
+#define PLAYER_WIDTH           31   // Adjusted for smaller sprite
+#define PLAYER_HEIGHT          30   // Adjusted for smaller sprite  
+#define PLATFORM_WIDTH         32   // Adjusted for smaller sprite
+#define PLATFORM_HEIGHT        9    // Adjusted for smaller sprite
 #define MAX_PLATFORMS          100
 #define PLATFORM_SPACING_MIN   70
 #define PLATFORM_SPACING_MAX   110
@@ -295,27 +295,73 @@ void load_game_textures(GameState *game) {
     game->background_texture = NULL;
     
 #if USE_IMAGES
-    printf("Loading textures using BadgeVMS file paths...\n");
-    // Try to load textures using BadgeVMS file paths
-    game->player_left_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]player_left.png");
-    game->player_right_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]player_right.png");
-    game->player_shoot_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]player_shoot.png");
-    game->projectile_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]projectile.png");
+    printf("Loading textures...\n");
     
-    // Load platform textures from sprite sheet using BadgeVMS file paths
-    // Standard platform: made taller to include bottom pixels
-    game->platform_normal_texture = load_tile_from_sprite_sheet(game->renderer, "APPS:[DOODLE-JUMP]game_tiles.png", 0, 0, 65, 18);
-    // Moving platform: works perfectly, keep as is
-    game->platform_moving_texture = load_tile_from_sprite_sheet(game->renderer, "APPS:[DOODLE-JUMP]game_tiles.png", 0, 18, 65, 18);
-    // Breakable platform: normal state
-    game->platform_breakable_texture = load_tile_from_sprite_sheet(game->renderer, "APPS:[DOODLE-JUMP]game_tiles.png", 0, 70, 65, 18);
-    // Spring platform: try different position
-    game->platform_spring_texture = load_tile_from_sprite_sheet(game->renderer, "APPS:[DOODLE-JUMP]game_tiles.png", 0, 35, 65, 18);
+    // Try BadgeVMS file paths first, then fallback to host development paths
+    const char *player_left_paths[] = {"APPS:[DOODLE-JUMP]player_left_small.png", "storage_skel/player_left_small.png"};
+    const char *player_right_paths[] = {"APPS:[DOODLE-JUMP]player_right_small.png", "storage_skel/player_right_small.png"};
+    const char *player_shoot_paths[] = {"APPS:[DOODLE-JUMP]player_shoot_small.png", "storage_skel/player_shoot_small.png"};
+    const char *projectile_paths[] = {"APPS:[DOODLE-JUMP]projectile_small.png", "storage_skel/projectile_small.png"};
+    const char *game_tiles_paths[] = {"APPS:[DOODLE-JUMP]game_tiles_small.png", "storage_skel/game_tiles_small.png"};
+    const char *background_paths[] = {"APPS:[DOODLE-JUMP]background_small.png", "storage_skel/background_small.png"};
+    
+    // Try to load textures with fallback paths
+    game->player_left_texture = load_texture_from_file(game->renderer, player_left_paths[0]);
+    if (!game->player_left_texture) {
+        game->player_left_texture = load_texture_from_file(game->renderer, player_left_paths[1]);
+    }
+    
+    game->player_right_texture = load_texture_from_file(game->renderer, player_right_paths[0]);
+    if (!game->player_right_texture) {
+        game->player_right_texture = load_texture_from_file(game->renderer, player_right_paths[1]);
+    }
+    
+    game->player_shoot_texture = load_texture_from_file(game->renderer, player_shoot_paths[0]);
+    if (!game->player_shoot_texture) {
+        game->player_shoot_texture = load_texture_from_file(game->renderer, player_shoot_paths[1]);
+    }
+    
+    game->projectile_texture = load_texture_from_file(game->renderer, projectile_paths[0]);
+    if (!game->projectile_texture) {
+        game->projectile_texture = load_texture_from_file(game->renderer, projectile_paths[1]);
+    }
+    
+    // Load platform textures from sprite sheet with fallback (adjusted for smaller sprite sheet)
+    // Standard platform: coordinates halved for smaller image
+    game->platform_normal_texture = load_tile_from_sprite_sheet(game->renderer, game_tiles_paths[0], 0, 0, 32, 9);
+    if (!game->platform_normal_texture) {
+        game->platform_normal_texture = load_tile_from_sprite_sheet(game->renderer, game_tiles_paths[1], 0, 0, 32, 9);
+    }
+    
+    // Moving platform
+    game->platform_moving_texture = load_tile_from_sprite_sheet(game->renderer, game_tiles_paths[0], 0, 9, 32, 9);
+    if (!game->platform_moving_texture) {
+        game->platform_moving_texture = load_tile_from_sprite_sheet(game->renderer, game_tiles_paths[1], 0, 9, 32, 9);
+    }
+    
+    // Breakable platform
+    game->platform_breakable_texture = load_tile_from_sprite_sheet(game->renderer, game_tiles_paths[0], 0, 35, 32, 9);
+    if (!game->platform_breakable_texture) {
+        game->platform_breakable_texture = load_tile_from_sprite_sheet(game->renderer, game_tiles_paths[1], 0, 35, 32, 9);
+    }
+    
+    // Spring platform
+    game->platform_spring_texture = load_tile_from_sprite_sheet(game->renderer, game_tiles_paths[0], 0, 18, 32, 9);
+    if (!game->platform_spring_texture) {
+        game->platform_spring_texture = load_tile_from_sprite_sheet(game->renderer, game_tiles_paths[1], 0, 18, 32, 9);
+    }
 
-    // Load monster textures from sprite sheet (to the right of platforms)
-    game->monster_basic_texture = load_tile_from_sprite_sheet(game->renderer, "APPS:[DOODLE-JUMP]game_tiles.png", 65, 0, 70, 90);
+    // Load monster textures from sprite sheet (coordinates halved)
+    game->monster_basic_texture = load_tile_from_sprite_sheet(game->renderer, game_tiles_paths[0], 32, 0, 35, 45);
+    if (!game->monster_basic_texture) {
+        game->monster_basic_texture = load_tile_from_sprite_sheet(game->renderer, game_tiles_paths[1], 32, 0, 35, 45);
+    }
 
-    game->background_texture = load_texture_from_file(game->renderer, "APPS:[DOODLE-JUMP]background.png");
+    // Background texture (now optimized for ESP32-P4)
+    game->background_texture = load_texture_from_file(game->renderer, background_paths[0]);
+    if (!game->background_texture) {
+        game->background_texture = load_texture_from_file(game->renderer, background_paths[1]);
+    }
     
     printf("Loaded textures: left=%p, right=%p, normal=%p, moving=%p, breakable=%p, spring=%p, monster=%p, bg=%p\n",
            (void*)game->player_left_texture, (void*)game->player_right_texture, 
@@ -388,9 +434,11 @@ void init_game(GameState *game) {
     
     // Load game textures
     load_game_textures(game);
+    printf("Textures loaded successfully, proceeding to platform generation...\n");
     
     // Generate initial platforms FIRST
     generate_platforms(game, true);
+    printf("Platforms generated successfully, positioning player...\n");
     
     // NOW position player on the starting platform (first platform should be the starting one)
     if (game->num_platforms > 0) {
@@ -1414,6 +1462,13 @@ SDL_AppResult SDL_AppInit(void **appstate, int argc, char *argv[]) {
 }
 
 SDL_AppResult SDL_AppIterate(void *appstate) {
+    static int iteration_count = 0;
+    iteration_count++;
+    
+    if (iteration_count % 60 == 0) {  // Print every 60 frames (~1 second)
+        printf("SDL_AppIterate: iteration %d\n", iteration_count);
+    }
+    
     GameState *game = (GameState *)appstate;
     
     // Calculate delta time using 32-bit arithmetic to avoid __floatundisf
